@@ -1,0 +1,5 @@
+node_modules/
+dist/
+server/ihop.db
+server/ihop.db-*
+.DS_Store

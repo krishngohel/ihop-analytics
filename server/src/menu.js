@@ -1,0 +1,33 @@
+// IHOP-style menu used by the seeder and the Excel template.
+// popularity = relative weight when generating mock orders.
+export const MENU = [
+  { item: "Original Buttermilk Pancakes (Full Stack)", category: "Pancakes", price: 9.99, popularity: 10 },
+  { item: "Chocolate Chocolate Chip Pancakes", category: "Pancakes", price: 11.49, popularity: 6 },
+  { item: "Cupcake Pancakes", category: "Pancakes", price: 11.49, popularity: 3 },
+  { item: "Strawberry Banana Pancakes", category: "Pancakes", price: 11.99, popularity: 5 },
+  { item: "Cinn-A-Stack Pancakes", category: "Pancakes", price: 11.99, popularity: 4 },
+  { item: "Breakfast Sampler", category: "Combos", price: 14.99, popularity: 9 },
+  { item: "2x2x2 Combo", category: "Combos", price: 11.99, popularity: 8 },
+  { item: "Split Decision Breakfast", category: "Combos", price: 13.49, popularity: 5 },
+  { item: "Country Fried Steak & Eggs", category: "Combos", price: 16.49, popularity: 4 },
+  { item: "T-Bone Steak & Eggs", category: "Combos", price: 19.99, popularity: 2 },
+  { item: "Colorado Omelette", category: "Omelettes", price: 14.99, popularity: 5 },
+  { item: "Big Steak Omelette", category: "Omelettes", price: 15.49, popularity: 4 },
+  { item: "Bacon Temptation Omelette", category: "Omelettes", price: 14.49, popularity: 4 },
+  { item: "Spinach & Mushroom Omelette", category: "Omelettes", price: 13.99, popularity: 3 },
+  { item: "Classic Burger", category: "Burgers & Sandwiches", price: 12.99, popularity: 4 },
+  { item: "Ham & Egg Melt", category: "Burgers & Sandwiches", price: 12.49, popularity: 3 },
+  { item: "Chicken Sandwich", category: "Burgers & Sandwiches", price: 12.99, popularity: 3 },
+  { item: "Crispy Chicken Strips & Fries", category: "Burgers & Sandwiches", price: 13.49, popularity: 4 },
+  { item: "Coffee", category: "Beverages", price: 3.49, popularity: 12 },
+  { item: "Orange Juice", category: "Beverages", price: 3.99, popularity: 7 },
+  { item: "Soft Drink", category: "Beverages", price: 3.29, popularity: 8 },
+  { item: "Milkshake", category: "Beverages", price: 5.99, popularity: 4 },
+  { item: "Hash Browns", category: "Sides", price: 4.49, popularity: 7 },
+  { item: "Bacon (4 strips)", category: "Sides", price: 4.99, popularity: 8 },
+  { item: "Sausage Links", category: "Sides", price: 4.99, popularity: 5 },
+  { item: "Seasonal Fresh Fruit", category: "Sides", price: 4.29, popularity: 3 },
+  { item: "Jr. Chocolate Chip Pancakes", category: "Kids", price: 6.99, popularity: 4 },
+  { item: "Jr. Cheeseburger", category: "Kids", price: 6.99, popularity: 3 },
+  { item: "Jr. Chicken Strips", category: "Kids", price: 6.99, popularity: 3 }
+];
