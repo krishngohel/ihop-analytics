@@ -300,6 +300,7 @@ export function ingestFile(buffer, opts = {}) {
     logIngest({ ...base, status: "rejected", detail: `Unreadable file: ${e.message}` });
     return { imported: 0, skipped: 0, status: "rejected", errors: [`Couldn't read that file: ${e.message}`] };
   }
+  if (opts.mapping && !Object.keys(opts.mapping).length) opts = { ...opts, mapping: null }; // nothing chosen: match columns automatically
   const profile = opts.mapping ? null : findProfile(table.headers, opts.kind || null);
   const kind = opts.kind || profile?.kind || detectKind(table.headers);
   const mapping = opts.mapping ? Object.fromEntries(Object.entries(opts.mapping).filter(([f, col]) => FIELDS[kind][f] && table.headers.includes(col)))

@@ -371,7 +371,7 @@ app.use((err, _req, res, _next) => {
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`IHOP Operations Dashboard running at http://localhost:${PORT}`);
-  if (db.prepare("SELECT COUNT(*) n FROM app_user").get().n === 0) console.log("No users yet. Run `npm run seed` to create the demo organization and sign-in accounts.");
+  if (db.prepare("SELECT COUNT(*) n FROM app_user").get().n === 0) console.log("No accounts yet. Open the address above in a browser to create the administrator account.");
   startScheduler();
   runRefresh("startup").catch((e) => console.error("Startup refresh failed:", e.message));
 });
