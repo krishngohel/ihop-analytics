@@ -1,0 +1,52 @@
+name: Release
+
+# Push a version tag (git tag v2.1.0 && git push origin v2.1.0) and this builds the
+# download zip for macOS and Windows and attaches it to a GitHub release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build the frontend
+        working-directory: client
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install server components (no native modules, so they run on any OS)
+        working-directory: server
+        run: npm ci --omit=dev
+
+      - name: Check the server starts and answers
+        working-directory: server
+        run: |
+          PORT=4999 OPS_DB_PATH=/tmp/ci.db node --experimental-sqlite src/index.js &
+          for i in $(seq 1 20); do curl -sf http://localhost:4999/api/auth/me && break; sleep 1; done
+          curl -sf http://localhost:4999/api/auth/me | grep -q needs_setup
+          curl -sf http://localhost:4999/ | grep -q "IHOP Operations Dashboard"
+
+      - name: Build the zip
+        run: python3 make-release.py
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ZIP=release/ihop-operations-dashboard.zip
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$ZIP" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$ZIP" --title "$GITHUB_REF_NAME" --generate-notes
+          fi

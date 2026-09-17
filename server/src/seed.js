@@ -1,80 +1,77 @@
-// Generates ~90 days of realistic mock POS data.
-import db from "./db.js";
-import { MENU } from "./menu.js";
+// Builds the demo organization: 120 restaurants, 120 days of results, real weather where
+// it can be fetched, sign-in accounts for each access level, and a partly completed
+// forecasting week. Safe to re-run: it only fills what is missing.
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import db, { setSetting } from "./db.js";
+import { addDays, today, yesterday } from "./dates.js";
+import { seedOrganization, generateHistory, generateLive } from "./sources/demo.js";
+import { refreshWeather } from "./weather.js";
+import { createUser, generatePassword } from "./auth.js";
+import { forecastForm, saveForecast, nextWeekStart, guideHours } from "./forecast.js";
+import { storeDailySummary } from "./summary.js";
 
-const DAYS = 90;
-const PAYMENTS = ["card", "card", "card", "cash", "mobile"];
+const HISTORY_DAYS = 120;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Weighted item picker
-const pool = [];
-MENU.forEach((m, i) => { for (let k = 0; k < m.popularity; k++) pool.push(i); });
-const pickItem = () => MENU[pool[Math.floor(Math.random() * pool.length)]];
+const created = seedOrganization();
+if (created) setSetting("data_source", "demo");
+console.log(created ? "Created 4 regions, 12 areas, 120 restaurants." : "Organization already exists, keeping it.");
 
-// Hour weights: IHOP peaks at breakfast/brunch, bump late night on weekends
-function hourWeight(hour, dow) {
-  const weekend = dow === 0 || dow === 6;
-  if (hour >= 7 && hour <= 10) return weekend ? 14 : 10;
-  if (hour >= 11 && hour <= 14) return weekend ? 10 : 7;
-  if (hour >= 15 && hour <= 17) return 3;
-  if (hour >= 18 && hour <= 21) return 5;
-  if (hour >= 22 || hour <= 1) return weekend ? 4 : 1.5;
-  return 0.5;
-}
-
-const insert = db.prepare(`
-  INSERT INTO sales (sold_at, item, category, quantity, unit_price, total, payment_method, source)
-  VALUES (?, ?, ?, ?, ?, ?, ?, 'seed')
-`);
-
-const existing = db.prepare("SELECT COUNT(*) c FROM sales WHERE source='seed'").get().c;
-if (existing > 0) {
-  console.log(`Seed data already present (${existing} rows). Run 'DELETE FROM sales WHERE source=''seed''' to reseed.`);
-  process.exit(0);
-}
-
-db.exec("BEGIN");
+const from = addDays(today(), -HISTORY_DAYS);
 try {
-  const now = new Date();
-  let rows = 0;
-  for (let d = DAYS; d >= 1; d--) {
-    const day = new Date(now);
-    day.setDate(now.getDate() - d);
-    const dow = day.getDay();
-    const weekend = dow === 0 || dow === 6;
-    // Orders per day: weekday ~140, weekend ~210, with noise + slight upward trend
-    const base = weekend ? 210 : 140;
-    const trend = 1 + (DAYS - d) * 0.0015;
-    const orders = Math.round(base * trend * (0.85 + Math.random() * 0.3));
-
-    for (let o = 0; o < orders; o++) {
-      // pick an hour weighted by daypart
-      let hour, tries = 0;
-      do {
-        hour = Math.floor(Math.random() * 24);
-        tries++;
-      } while (Math.random() * 14 > hourWeight(hour, dow) && tries < 50);
-      const minute = Math.floor(Math.random() * 60);
-      const soldAt = new Date(day);
-      soldAt.setHours(hour, minute, 0, 0);
-      const pay = PAYMENTS[Math.floor(Math.random() * PAYMENTS.length)];
-
-      // each order = 1-4 line items
-      const lines = 1 + Math.floor(Math.random() * 4);
-      for (let l = 0; l < lines; l++) {
-        const m = pickItem();
-        const qty = Math.random() < 0.12 ? 2 : 1;
-        insert.run(
-          soldAt.toISOString(),
-          m.item, m.category, qty, m.price,
-          +(qty * m.price).toFixed(2), pay
-        );
-        rows++;
-      }
-    }
-  }
-  db.exec("COMMIT");
-  console.log(`Seeded ${rows} sale line items across ${DAYS} days.`);
+  const wx = await refreshWeather(from, today());
+  console.log(`Weather: ${wx.rows} rows from Open-Meteo for ${wx.points} locations${wx.errors.length ? ` (partial: ${wx.errors.join("; ")})` : ""}.`);
 } catch (e) {
-  db.exec("ROLLBACK");
-  throw e;
+  console.log(`Weather fetch failed (${e.message}). Using generated weather instead.`);
 }
+
+const hist = generateHistory(from, yesterday());
+generateLive();
+console.log(`Results: ${hist.days} days for ${hist.restaurants} restaurants, plus today's live sales.`);
+
+if (db.prepare("SELECT COUNT(*) n FROM app_user").get().n === 0) {
+  const password = process.env.DEMO_PASSWORD || generatePassword();
+  const region = db.prepare("SELECT region_id, region_name FROM region ORDER BY region_id LIMIT 1").get();
+  const area = db.prepare("SELECT area_id, area_name, area_manager FROM area ORDER BY area_id LIMIT 1").get();
+  const store = db.prepare("SELECT restaurant_id, restaurant_name FROM restaurant ORDER BY restaurant_id LIMIT 1").get();
+  const users = [
+    { email: "exec@demo.local", display_name: "Executive (company-wide)", role: "executive" },
+    { email: "region@demo.local", display_name: `${region.region_name} regional lead`, role: "region", scope_id: region.region_id },
+    { email: "area@demo.local", display_name: `${area.area_manager} (${area.area_name} area)`, role: "area", scope_id: area.area_id },
+    { email: "store@demo.local", display_name: `${store.restaurant_name} manager`, role: "store", scope_id: store.restaurant_id },
+  ];
+  users.forEach((u) => createUser({ ...u, password }));
+  const file = path.join(__dirname, "..", ".demo-credentials.txt");
+  fs.writeFileSync(file, `Demo sign-ins (password is the same for all four):\n${users.map((u) => `  ${u.email}  [${u.role}]`).join("\n")}\nPassword: ${password}\n`);
+  console.log(`Sign-in accounts created. Credentials saved to ${file}`);
+}
+
+// A forecasting week in progress: most stores submitted, some with issues, some missing.
+const week = nextWeekStart();
+if (db.prepare("SELECT COUNT(*) n FROM forecast_submission WHERE week_start = ?").get(week).n === 0) {
+  const exec = { role: "executive", email: "seed" };
+  const REASONS = ["Trailing four weeks running below last year; trimmed the system number", "Local high school homecoming weekend, expecting a stronger Saturday", "Road work on the frontage road is cutting morning traffic",
+    "New apartment complex opened nearby, breakfast counts are climbing", "Competitor reopened across the street last week", "Holding close to system forecast; recent weeks match it"];
+  let n = 0;
+  for (const row of forecastForm(exec, week).rows) {
+    const k = row.restaurant_id;
+    if (k % 7 === 0) continue; // missing
+    const adj = k % 5 === 0 ? 0 : (((k * 37) % 13) - 6) / 100;
+    const managerForecast = Math.round(row.system_forecast * (1 + adj + (row.recent_trend || 0) / 250));
+    const managerHours = 168 + (k % 4) * 6;
+    const slack = k % 11 === 0 ? 1.07 : k % 9 === 0 ? 0.9 : 1 + ((k % 5) - 2) / 100;
+    const body = {
+      week_start: week, restaurant_id: k, manager_forecast: managerForecast, scheduled_hours: Math.round(guideHours(managerForecast) * slack), manager_hours: managerHours,
+      forecast_adjustment_reason: k % 10 === 3 ? "" : REASONS[k % REASONS.length], notes: "", submit: k % 6 !== 1,
+    };
+    // A form that fails the reconciliation checks stays on file as an incomplete draft.
+    if (saveForecast(exec, body).status === 422) saveForecast(exec, { ...body, submit: false });
+    n++;
+  }
+  console.log(`Forecasting form for week of ${week}: ${n} stores started.`);
+}
+
+storeDailySummary(yesterday());
+console.log("Done. Start the dashboard with: npm start");

@@ -1,5 +1,9 @@
 node_modules/
 dist/
-server/ihop.db
-server/ihop.db-*
+server/*.db
+server/*.db-*
+server/.demo-credentials.txt
+server/import/
 .DS_Store
+server/.env
+release/
