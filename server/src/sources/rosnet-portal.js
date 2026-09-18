@@ -146,6 +146,10 @@ async function syncLocations(cfg, token) {
   const f = await gateway(cfg, token, "getLocationFilters", svc("LocationFilter"));
   // The store's real number is the prefix of its label ("648 - South San Francisco"), NOT the
   // internal `value` (an unrelated location id) — every data widget keys on that store number.
+  // Rosnet keeps housekeeping buckets (Delete, Office, Historical, Do Not Use) and closed
+  // stores in the hierarchy; they are not real operating restaurants, so drop them — they are
+  // what makes the dashboard read like a raw Rosnet export (a "Delete" region, -100% ghosts).
+  const JUNK = /\b(delete|office|historical|do not use|inactive|closed|test)\b/i;
   const stores = (f.level1?.choices || []).map((c) => {
     const number = Number(String(c.label).match(/^\s*(\d+)/)?.[1]);
     return {
@@ -153,7 +157,7 @@ async function syncLocations(cfg, token) {
       name: String(c.label).replace(/^\s*\d+\s*-\s*/, "").trim() || `Store ${number}`,
       area: c.parentValue || null, // level2
     };
-  }).filter((s) => s.id); // skip any non-store choice with no leading number
+  }).filter((s) => s.id && !JUNK.test(s.name)); // skip non-stores and closed/junk locations
   const areaToRegion = new Map((f.level2?.choices || []).map((c) => [c.value, c.parentValue || null])); // level2 -> level3
   const known = new Map(db.prepare("SELECT restaurant_id, store_number FROM restaurant WHERE is_demo = 0 AND store_number IS NOT NULL").all()
     .map((r) => [String(r.store_number).trim().replace(/^0+/, ""), r.restaurant_id]));
@@ -162,23 +166,37 @@ async function syncLocations(cfg, token) {
   const map = new Map();
   const added = [];
   transaction(() => {
+    // Remove any junk restaurants a previous sync created before this filter existed.
+    const junkRows = db.prepare("SELECT r.restaurant_id, r.restaurant_name, a.area_name, reg.region_name FROM restaurant r JOIN area a ON a.area_id = r.area_id JOIN region reg ON reg.region_id = r.region_id WHERE r.is_demo = 0").all()
+      .filter((r) => JUNK.test(r.restaurant_name) || JUNK.test(r.area_name) || JUNK.test(r.region_name));
+    for (const j of junkRows) {
+      for (const tbl of ["daily_performance", "guest_metrics", "weather", "forecast_submission"]) {
+        db.prepare(`DELETE FROM ${tbl} WHERE restaurant_id = ?`).run(j.restaurant_id);
+      }
+      db.prepare("DELETE FROM restaurant WHERE restaurant_id = ?").run(j.restaurant_id);
+    }
+    db.exec("DELETE FROM area WHERE area_id NOT IN (SELECT DISTINCT area_id FROM restaurant)");
+    db.exec("DELETE FROM region WHERE region_id NOT IN (SELECT DISTINCT region_id FROM restaurant)");
+
     for (const s of stores) {
       const key = s.number.replace(/^0+/, "");
       const areaName = s.area || "Rosnet";
       const regionName = areaToRegion.get(s.area) || s.area || "Rosnet";
+      if (JUNK.test(areaName) || JUNK.test(regionName)) continue; // store parked under a housekeeping group
       db.prepare("INSERT OR IGNORE INTO region (region_name) VALUES (?)").run(regionName);
       const regionId = db.prepare("SELECT region_id FROM region WHERE region_name = ?").get(regionName).region_id;
       db.prepare("INSERT OR IGNORE INTO area (area_name, region_id, area_manager) VALUES (?, ?, NULL)").run(areaName, regionId);
       const areaId = db.prepare("SELECT area_id FROM area WHERE area_name = ? AND region_id = ?").get(areaName, regionId).area_id;
       if (known.has(key)) {
-        db.prepare("UPDATE restaurant SET region_id = ?, area_id = ? WHERE restaurant_id = ?").run(regionId, areaId, known.get(key));
+        db.prepare("UPDATE restaurant SET region_id = ?, area_id = ?, city = COALESCE(NULLIF(city, ''), ?) WHERE restaurant_id = ?").run(regionId, areaId, s.name, known.get(key));
         map.set(s.id, known.get(key));
         continue;
       }
       const name = `IHOP #${s.id} ${s.name}`.trim();
       const taken = db.prepare("SELECT 1 FROM restaurant WHERE restaurant_name = ?").get(name);
-      const rid = Number(db.prepare("INSERT INTO restaurant (restaurant_name, store_number, region_id, area_id, timezone) VALUES (?, ?, ?, ?, 'America/Chicago')")
-        .run(taken ? `${name} (#${s.id})` : name, s.number, regionId, areaId).lastInsertRowid);
+      // The store name is usually its city, which is what the weather geocoder needs.
+      const rid = Number(db.prepare("INSERT INTO restaurant (restaurant_name, store_number, region_id, area_id, city, timezone) VALUES (?, ?, ?, ?, ?, 'America/Chicago')")
+        .run(taken ? `${name} (#${s.id})` : name, s.number, regionId, areaId, s.name).lastInsertRowid);
       map.set(s.id, rid);
       added.push(name);
     }
