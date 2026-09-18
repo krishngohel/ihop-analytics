@@ -208,22 +208,23 @@ async function syncLocations(cfg, token) {
 async function syncPeriod(cfg, token, date, map, { live }) {
   const period = live ? "RT" : "DAY";
   const rows = new Map(); // restaurant_id -> row
+  // No is_final here: savePerformance treats a row dated today as live and derives the
+  // forecast earned to this point from the full-day forecast, exactly as the other sources do.
   const at = (id) => {
     const rid = map.get(Number(id));
     if (!rid) return null;
-    if (!rows.has(rid)) rows.set(rid, { date, restaurant_id: rid, daypart: "all", is_final: live ? 0 : 1 });
+    if (!rows.has(rid)) rows.set(rid, { date, restaurant_id: rid, daypart: "all" });
     return rows.get(rid);
   };
 
-  // Sales: actual + forecast (one widget), last year (comp widget).
+  // Sales: actual + full-day forecast (one widget), and last year (comp widget) — for the live
+  // day as well, so the live view has a forecast-to-now and a last-year comparison, not blanks.
   const fc = await gateway(cfg, token, "AvF", svc("ActualVsForecastSales/widget"), filter(period));
   const { a: actual, b: forecast } = pairFromBars(fc, "Actual Sales", "Forecast Sales");
   for (const [id, v] of actual) { const r = at(id); if (r) r.actual_sales = v; }
   for (const [id, v] of forecast) { const r = at(id); if (r && v !== null) r.forecast_sales = v; }
-  if (!live) {
-    const comp = await gateway(cfg, token, "Comp", svc("CompSalesByLocation/widget"), filter("DAY", { compPeriod: "comp", rtComp: "whole" }));
-    for (const [id, v] of byStoreFromBars(comp, "Comp")) { const r = at(id); if (r) r.prior_year_sales = v; }
-  }
+  const comp = await gateway(cfg, token, "Comp", svc("CompSalesByLocation/widget"), filter(period, { compPeriod: "comp", rtComp: "whole" }));
+  for (const [id, v] of byStoreFromBars(comp, "Comp")) { const r = at(id); if (r && v !== null) r.prior_year_sales = v; }
 
   // Labor: forecast(=allowable), scheduled, actual hours; and labor cost.
   const hrs = await gateway(cfg, token, "Hrs", svc("LaborByLocation/ForecastActualTheoHoursByLocation/widget"), laborFilter(period));
