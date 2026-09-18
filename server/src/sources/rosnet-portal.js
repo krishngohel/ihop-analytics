@@ -92,6 +92,24 @@ async function gateway(cfg, token, label, endpoint, body = null) {
   return res.json();
 }
 
+/**
+ * The data gateway needs the numeric client id (e.g. 95) in a header, which most operators
+ * don't know — only the client code (ACGTX). The token's ACLs list the client id(s) this
+ * login can read, so a single-client login resolves automatically. Returns a session (cfg
+ * with clientId filled in) to pass to the gateway.
+ */
+async function resolveSession(cfg, token) {
+  if (cfg.clientId) return cfg;
+  let acls = [];
+  try {
+    const v = await gateway({ ...cfg, clientId: "" }, token, "validate-token", `${ACCOUNT_URL}/api/validate-token`);
+    acls = Array.isArray(v.acls) ? v.acls : JSON.parse(String(v.acls || "[]"));
+  } catch { /* fall through to the clear error below */ }
+  if (acls.length === 1) return { ...cfg, clientId: String(acls[0]) };
+  if (acls.length > 1) throw new Error(`This login can see ${acls.length} Rosnet clients (ids ${acls.join(", ")}). It needs one client id — tell me which and I'll set it.`);
+  throw new Error("Signed in, but Rosnet didn't report which client this login can read. The account may need a client selected first.");
+}
+
 const svc = (path) => SVC + path;
 const num = (v) => (v === null || v === undefined || v === "" || Number.isNaN(Number(v)) ? null : Number(v));
 // Shared filter body: every location, one aggregate for the chosen period.
@@ -238,9 +256,10 @@ export async function testPortal(override = {}) {
   const cfg = { ...portalConfig(), ...Object.fromEntries(Object.entries(override).filter(([, v]) => v)) };
   if (!cfg.username || !cfg.password) throw new Error("Enter the Rosnet portal username and password.");
   const token = await login(cfg);
-  const f = await gateway(cfg, token, "getLocationFilters", svc("LocationFilter"));
+  const session = await resolveSession(cfg, token);
+  const f = await gateway(session, token, "getLocationFilters", svc("LocationFilter"));
   const stores = f.level1?.choices || [];
-  return { locations: stores.length, client: cfg.client || null, sample: stores.slice(0, 5).map((c) => c.label.trim()) };
+  return { locations: stores.length, client: session.client || null, client_id: session.clientId || null, sample: stores.slice(0, 5).map((c) => c.label.trim()) };
 }
 
 /**
@@ -251,14 +270,15 @@ export async function syncPortal({ light = false } = {}) {
   const cfg = portalConfig();
   if (!cfg.configured) return { skipped: "Rosnet portal username and password are not set" };
   const token = await login(cfg);
-  const { map, count, added } = await syncLocations(cfg, token);
+  const session = await resolveSession(cfg, token);
+  const { map, count, added } = await syncLocations(session, token);
   if (!map.size) return { locations: count, rows: 0, note: "The portal returned no locations for this login" };
 
   let rows = 0;
-  if (!light) rows += await syncPeriod(cfg, token, yesterday(), map, { live: false });
-  rows += await syncPeriod(cfg, token, today(), map, { live: true });
+  if (!light) rows += await syncPeriod(session, token, yesterday(), map, { live: false });
+  rows += await syncPeriod(session, token, today(), map, { live: true });
   const seededHistory = !light && !db.prepare("SELECT 1 FROM daily_performance WHERE source = 'rosnet' AND date < ? LIMIT 1").get(yesterday());
-  if (seededHistory) rows += await seedSalesHistory(cfg, token, map);
+  if (seededHistory) rows += await seedSalesHistory(session, token, map);
 
   if (rows) setSetting("data_source", "import");
   const detail = [added.length ? `${added.length} restaurants added` : null, seededHistory ? "seeded recent sales history" : null].filter(Boolean).join(" | ");

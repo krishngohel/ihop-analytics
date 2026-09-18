@@ -44,6 +44,7 @@ const server = http.createServer((req, res) => {
     seen.clientIds.add(req.headers.clientid);
     if (!/access_token=tok-abc123/.test(req.headers.cookie || "")) { res.writeHead(401); return res.end("{}"); }
     const label = url.search.replace(/^\?/, "");
+    if (label === "validate-token") return json({ status: 200, acls: "[95]" });
     if (label === "getLocationFilters") return json(LOCATIONS);
     if (label === "AvF") return json(bars({ label: "Actual Sales", data: [8000, 5500] }, { label: "Forecast Sales", data: [8200, 5400] }));
     if (label === "Comp") return json(bars({ label: "Sales", data: [8000, 5500] }, { label: "Comp", data: [7000, 6000] }));
@@ -112,6 +113,13 @@ test("signs in to the portal and pulls sales, forecast, last year and labor by s
   assert.equal(db.prepare("SELECT is_final FROM daily_performance WHERE date = ? LIMIT 1").get(today()).is_final, 0, "today is live");
   const seeded = db.prepare("SELECT actual_sales FROM daily_performance p JOIN restaurant r USING (restaurant_id) WHERE r.store_number = '1404' AND date = ?").get(addDays(today(), -2));
   assert.equal(seeded?.actual_sales, 7800, "the by-date report seeded history");
+
+  // With no client id supplied, it resolves from the token's ACLs (validate-token) instead of 403ing.
+  delete process.env.ROSNET_PORTAL_CLIENT_ID;
+  const probe2 = await testPortal();
+  assert.equal(probe2.client_id, "95", "client id resolved from the token ACLs");
+  assert.equal(probe2.locations, 2);
+  process.env.ROSNET_PORTAL_CLIENT_ID = "95";
 });
 
 test("a bad portal password gives a clear error and never appears in the message", async () => {
