@@ -17,7 +17,7 @@ const COLUMNS = [
 ];
 
 // Sortable comparison table used for regions, areas and restaurants alike.
-export default function PerfTable({ rows, linkFor, nameLabel = "Name", showSeverity = false, subtitleFor = null, defaultSort = "sales_variance_pct" }) {
+export default function PerfTable({ rows, linkFor, nameLabel = "Name", showSeverity = false, subtitleFor = null, hideGuest = false, defaultSort = "sales_variance_pct" }) {
   const [sort, setSort] = useState({ key: defaultSort, dir: 1 });
   const sorted = useMemo(() => {
     const out = [...rows];
@@ -32,7 +32,7 @@ export default function PerfTable({ rows, linkFor, nameLabel = "Name", showSever
   const maxOf = (key) => rows.reduce((m, r) => Math.max(m, Math.abs(r[key] ?? 0)), 0);
   const maxSales = maxOf("sales_variance_pct");
   const maxLabor = maxOf("labor_variance_pct");
-  const columns = COLUMNS.filter((c) => c.key !== "hotspot_count" || !showSeverity);
+  const columns = COLUMNS.filter((c) => (c.key !== "hotspot_count" || !showSeverity) && !(hideGuest && (c.key === "average_rating" || c.key === "survey_count")));
   const clickSort = (key) => setSort((s) => (s.key === key ? { key, dir: -s.dir } : { key, dir: key === "name" ? 1 : key.includes("labor") ? -1 : 1 }));
 
   return (
@@ -63,8 +63,8 @@ export default function PerfTable({ rows, linkFor, nameLabel = "Name", showSever
               <td className="num"><Delta value={r.prior_year_variance_pct} /></td>
               <td className={`num money ${laborTone(r.labor_variance)}`}>{fmtHoursSigned(r.labor_variance)}</td>
               <td className="num"><VarCell value={r.labor_variance_pct} max={maxLabor} kind="labor" /></td>
-              <td className="num money">{fmtRating(r.average_rating)}</td>
-              <td className="num money">{fmtNum(r.survey_count)}</td>
+              {!hideGuest && <td className="num money">{fmtRating(r.average_rating)}</td>}
+              {!hideGuest && <td className="num money">{fmtNum(r.survey_count)}</td>}
               {!showSeverity && <td className="num money">{r.hotspot_count ? <strong>{r.hotspot_count}</strong> : 0}<span className="neutral"> / {r.restaurants}</span></td>}
               {showSeverity && <td><SeverityBadge severity={r.severity} /></td>}
             </tr>

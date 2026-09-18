@@ -71,7 +71,7 @@ export default function RollupPage({ level, regionId = null, areaId = null }) {
       <div className="card">
         <h3>{child.plural}</h3>
         <p className="muted card-sub">Select a column heading to rank by it.</p>
-        <PerfTable rows={data.rows} linkFor={child.path} nameLabel={child.label} showSeverity={level === "store"}
+        <PerfTable rows={data.rows} linkFor={child.path} nameLabel={child.label} showSeverity={level === "store"} hideGuest={!data.rows.some((r) => r.survey_count > 0)}
           subtitleFor={level === "area" ? (r) => r.area_manager : level === "store" ? (r) => (r.flags?.length ? r.flags.join(" · ") : null) : null} />
       </div>
     </div>

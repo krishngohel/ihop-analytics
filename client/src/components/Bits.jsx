@@ -27,6 +27,37 @@ export function Delta({ value, kind = "sales", suffix = "" }) {
   return <span className={`money ${tone}`}>{fmtPct(value)}{suffix}</span>;
 }
 
+/** A bold, filled delta with a direction arrow — the at-a-glance version of Delta, for scorecards. */
+export function DeltaChip({ value, kind = "sales", suffix = "" }) {
+  if (value === null || value === undefined) return <span className="delta-chip neutral">–</span>;
+  const tone = kind === "labor" ? laborTone(value) : salesTone(value);
+  const arrow = value > 0 ? "↑" : value < 0 ? "↓" : "→";
+  return <span className={`delta-chip ${tone}`}><span aria-hidden="true">{arrow}</span>{fmtPct(value).replace("+", "")}{suffix}</span>;
+}
+
+const STATUS_WORD = { ok: "On track", watch: "Watch", attention: "Needs attention", neutral: "No data yet" };
+export function StatusPill({ tone }) {
+  const I = TONE_ICON[tone] || CheckIcon;
+  return <span className={`status-pill tone-${tone}`}><I size={14} />{STATUS_WORD[tone] || "—"}</span>;
+}
+
+/**
+ * A big scorecard tile: label, a large value, a filled delta, and a context line. The one
+ * signal a reader should catch in a glance; details live in the tables below.
+ */
+export function ScoreTile({ label, value, delta, deltaKind = "sales", deltaLabel, sub, accent, to }) {
+  const inner = (
+    <>
+      <div className="score-label">{label}{to && <span className="tile-go" aria-hidden="true">→</span>}</div>
+      <div className="score-value">{value}</div>
+      {delta !== undefined && <div className="score-delta"><DeltaChip value={delta} kind={deltaKind} />{deltaLabel && <span className="score-delta-label">{deltaLabel}</span>}</div>}
+      {sub && <div className="score-sub">{sub}</div>}
+    </>
+  );
+  const cls = `score-tile${accent ? " accent" : ""}${to ? " link" : ""}`;
+  return to ? <Link className={cls} to={to}>{inner}</Link> : <div className={cls}>{inner}</div>;
+}
+
 /**
  * A variance percentage with a small bar either side of a zero line, scaled to `max`
  * (the largest variance in the table) so rows can be compared at a glance.
@@ -91,10 +122,10 @@ export function PerformanceStrip({ t, live = false, extra = null }) {
       <Stat label="Labor variance" value={<span className={laborTone(t.labor_variance)}>{fmtHoursSigned(t.labor_variance)}</span>} lines={[
         <span key="p"><Delta value={t.labor_variance_pct} kind="labor" /> <span className="neutral">vs. allowable</span></span>,
       ]} />
-      {!live && (
+      {!live && t.survey_count > 0 && (
         <Stat label="Guest rating" value={fmtRating(t.average_rating)} lines={[
           <span key="s" className="neutral">{fmtNum(t.survey_count)} surveys</span>,
-          <span key="g" className="neutral">Google {fmtRating(t.google_rating)} · {fmtNum(t.google_review_count)} reviews</span>,
+          t.google_review_count ? <span key="g" className="neutral">Google {fmtRating(t.google_rating)} · {fmtNum(t.google_review_count)} reviews</span> : null,
         ]} />
       )}
       {extra}
@@ -108,12 +139,17 @@ export { Stat };
  * Today / yesterday / period card. The live card adds a meter of sales so far against the
  * full-day forecast. `detailed` adds the dollar and hour figures behind each percentage.
  */
-export function Snapshot({ title, caption, t, live = false, detailed = false }) {
-  const heading = <h3>{title}{live && <span className="live-pill"><i />Live</span>}</h3>;
-  if (!t || t.actual_sales === undefined || t.actual_sales === null) return <div className="card snapshot">{heading}<p className="muted">Nothing on file yet.</p></div>;
+export function Snapshot({ title, caption, t, live = false, detailed = false, to }) {
+  const heading = <h3>{title}{live && <span className="live-pill"><i />Live</span>}{to && <span className="tile-go" aria-hidden="true">→</span>}</h3>;
+  const cls = `card snapshot${to ? " link" : ""}`;
+  if (!t || t.actual_sales === undefined || t.actual_sales === null) {
+    const empty = <>{heading}<p className="muted">Nothing on file yet.</p></>;
+    return to ? <Link className={cls} to={to}>{empty}</Link> : <div className={cls}>{empty}</div>;
+  }
   const progress = live && t.forecast_sales ? Math.min(100, Math.round((t.actual_sales / t.forecast_sales) * 100)) : null;
+  const Wrap = to ? Link : "div";
   return (
-    <div className="card snapshot">
+    <Wrap className={cls} {...(to ? { to } : {})}>
       {heading}
       <div className="muted">{caption}</div>
       <div className="snapshot-value">{fmt$(t.actual_sales)}</div>
@@ -129,7 +165,7 @@ export function Snapshot({ title, caption, t, live = false, detailed = false }) 
         <div><dt>Labor vs. allowable</dt><dd><Delta value={t.labor_variance_pct} kind="labor" />{detailed && t.labor_variance !== null && t.labor_variance !== undefined && <> <span className={`money ${laborTone(t.labor_variance)}`}>({fmtHoursSigned(t.labor_variance)})</span></>}</dd></div>
         {detailed && !live && <div><dt>Guest rating</dt><dd className="money">{fmtRating(t.average_rating)} <span className="neutral">({fmtNum(t.survey_count)} surveys)</span></dd></div>}
       </dl>
-    </div>
+    </Wrap>
   );
 }
 

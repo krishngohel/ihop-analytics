@@ -107,6 +107,9 @@ export default function App() {
               <i className={`live-dot${stale ? " stale" : ""}`} aria-hidden="true" />
               <span><span className="refresh-label">Data refreshed </span><strong>{prettyTime(refresh?.last?.finished_at)}</strong></span>
             </div>
+            <button type="button" className="icon-btn" onClick={toggle} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>
+              {theme === "dark" ? <SunIcon size={17} /> : <MoonIcon size={17} />}
+            </button>
             <button type="button" className="btn secondary small" onClick={refreshNow} disabled={refreshing}>
               <RefreshIcon size={14} className={refreshing ? "spin" : ""} />{refreshing ? "Refreshing…" : "Refresh now"}
             </button>
