@@ -15,13 +15,15 @@ import XLSX from "xlsx";
 import db, { transaction, setSetting, audit, DAYPARTS } from "./db.js";
 import { savePerformance, saveGuestMetrics } from "./performance.js";
 import { isoDate, isDay, addDays, today } from "./dates.js";
+import { connectionValue } from "./connections.js";
 
 const norm = (k) => String(k ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
 // Vendor reports abbreviate ("Net Sls", "Fcst", "Avg Rtg"). Expand before matching column names.
 const ABBREVIATIONS = { sls: "sales", sale: "sales", fcst: "forecast", fcast: "forecast", proj: "projected", act: "actual", actl: "actual", sched: "scheduled", schd: "scheduled",
   hrs: "hours", hr: "hours", mgr: "manager", mgmt: "management", lbr: "labor", avg: "average", rtg: "rating", cnt: "count", qty: "count", num: "number", no: "number",
-  loc: "location", rest: "restaurant", dt: "date", yr: "year", pct: "percent", amt: "amount", tot: "total", rev: "review", revs: "reviews" };
+  loc: "location", rest: "restaurant", dt: "date", yr: "year", pct: "percent", amt: "amount", tot: "total", rev: "review", revs: "reviews",
+  rgn: "region", reg: "region", dist: "district", ns: "net sales", bus: "business", allow: "allowable", allowed: "allowable" };
 const canon = (k) => norm(k).split(" ").map((w) => ABBREVIATIONS[w] || w).join(" ").replace(/^ly/, "last year").replace(/^py/, "prior year");
 
 const STORE_NUMBER = ["store number", "store", "store no", "store id", "unit", "unit number", "unit no", "restaurant number", "location number", "location id", "site", "site number"];
@@ -29,7 +31,7 @@ const STORE_NAME = ["restaurant", "restaurant name", "store name", "location", "
 
 export const FIELDS = {
   performance: {
-    date: { label: "Business date", aliases: ["date", "business date", "day", "bus date", "sales date"] },
+    date: { label: "Business date", aliases: ["date", "business date", "business day", "day", "bus date", "sales date", "trans date", "transaction date"] },
     store_number: { label: "Store number", aliases: STORE_NUMBER },
     restaurant_name: { label: "Restaurant name", aliases: STORE_NAME },
     region: { label: "Region", aliases: ["region", "region name"] },
@@ -37,7 +39,7 @@ export const FIELDS = {
     area_manager: { label: "Area manager", aliases: ["area manager", "area director", "district manager", "dm", "area coach"] },
     daypart: { label: "Daypart", aliases: ["daypart", "day part", "meal period", "shift"] },
     actual_sales: { label: "Actual sales", aliases: ["actual sales", "net sales", "sales", "actual net sales", "total net sales", "actual"] },
-    forecast_sales: { label: "Forecast sales", aliases: ["forecast sales", "forecast", "sales forecast", "projected sales", "fcst sales", "fcst", "projection"] },
+    forecast_sales: { label: "Forecast sales", aliases: ["forecast sales", "forecast", "sales forecast", "projected sales", "fcst sales", "fcst", "projection", "forecast net sales", "projected net sales"] },
     prior_year_sales: { label: "Last year sales", aliases: ["prior year sales", "last year sales", "ly sales", "py sales", "last year", "ly net sales", "ly"] },
     actual_labor_hours: { label: "Actual labor hours", aliases: ["actual labor hours", "actual hours", "labor hours", "hours worked", "act hours", "actual hrs"] },
     scheduled_labor_hours: { label: "Scheduled labor hours", aliases: ["scheduled labor hours", "scheduled hours", "scheduled labor", "sched hours", "sched hrs"] },
@@ -71,8 +73,16 @@ const GUEST_METRICS = ["survey_count", "average_rating", "google_review_count", 
 const ALL_ALIASES = new Set(Object.values(FIELDS).flatMap((k) => Object.values(k).flatMap((f) => f.aliases.map(canon))));
 
 // ---- reading -------------------------------------------------------------------------
+// The spreadsheet reader turns "2026-09-16" in a CSV into midnight UTC, but "9/16/2026" and
+// real Excel date cells into midnight local time. Reading a UTC midnight with local getters
+// files the row a day early anywhere west of Greenwich, so each is read the way it was made.
+function dateCellDay(d) {
+  const utcMidnight = d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0;
+  return utcMidnight ? d.toISOString().slice(0, 10) : isoDate(d);
+}
+
 function cellText(v) {
-  if (v instanceof Date) return isoDate(v);
+  if (v instanceof Date) return dateCellDay(v);
   return String(v ?? "").trim();
 }
 
@@ -153,7 +163,7 @@ function missingRequirements(kind, mapping) {
 
 // ---- values ------------------------------------------------------------------------------
 function toDay(v) {
-  if (v instanceof Date && !Number.isNaN(v.getTime())) return isoDate(v);
+  if (v instanceof Date && !Number.isNaN(v.getTime())) return dateCellDay(v);
   const s = String(v ?? "").trim();
   if (isDay(s.slice(0, 10))) return s.slice(0, 10);
   const us = s.match(/(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})/);
@@ -207,6 +217,27 @@ export function clearDemoData() {
   return true;
 }
 
+// The Rosnet API lists stores with no region or area, so they start under "Unassigned". The
+// first store list or report that names a region and area for one files it there, and fills
+// in the name, address and area manager the API doesn't carry.
+const unassigned = db.prepare(`SELECT r.restaurant_id FROM restaurant r JOIN area a ON a.area_id = r.area_id WHERE r.restaurant_id = ? AND a.area_name = 'Unassigned'`);
+function place(id, m) {
+  if (!m.region || !m.area || !unassigned.get(id)) return id;
+  const regionName = String(m.region).trim();
+  const areaName = String(m.area).trim();
+  db.prepare("INSERT OR IGNORE INTO region (region_name) VALUES (?)").run(regionName);
+  const regionId = db.prepare("SELECT region_id FROM region WHERE region_name = ?").get(regionName).region_id;
+  db.prepare("INSERT OR IGNORE INTO area (area_name, region_id, area_manager) VALUES (?, ?, ?)").run(areaName, regionId, m.area_manager ? String(m.area_manager).trim() : null);
+  const areaId = db.prepare("SELECT area_id FROM area WHERE area_name = ? AND region_id = ?").get(areaName, regionId).area_id;
+  db.prepare("UPDATE restaurant SET region_id = ?, area_id = ?, address = COALESCE(address, ?), city = COALESCE(city, ?), state = COALESCE(state, ?) WHERE restaurant_id = ?")
+    .run(regionId, areaId, m.address || null, m.city || null, m.state || null, id);
+  const name = m.restaurant_name ? String(m.restaurant_name).trim() : null;
+  if (name && !db.prepare("SELECT 1 FROM restaurant WHERE restaurant_name = ?").get(name)) db.prepare("UPDATE restaurant SET restaurant_name = ? WHERE restaurant_id = ?").run(name, id);
+  db.exec("DELETE FROM area WHERE area_name = 'Unassigned' AND area_id NOT IN (SELECT DISTINCT area_id FROM restaurant)");
+  db.exec("DELETE FROM region WHERE region_name = 'Unassigned' AND region_id NOT IN (SELECT DISTINCT region_id FROM restaurant) AND region_id NOT IN (SELECT DISTINCT region_id FROM area)");
+  return id;
+}
+
 function restaurantResolver({ allowCreate }) {
   const byNumber = new Map();
   const byName = new Map();
@@ -220,12 +251,12 @@ function restaurantResolver({ allowCreate }) {
     resolve(m) {
       const number = m.store_number !== undefined && m.store_number !== "" ? String(m.store_number).trim().toLowerCase().replace(/^0+/, "") : null;
       const name = m.restaurant_name ? String(m.restaurant_name).trim() : null;
-      if (number && byNumber.has(number)) return byNumber.get(number);
-      if (name && byName.has(name.toLowerCase())) return byName.get(name.toLowerCase());
+      if (number && byNumber.has(number)) return place(byNumber.get(number), m);
+      if (name && byName.has(name.toLowerCase())) return place(byName.get(name.toLowerCase()), m);
       // Another system's location name often carries the store number ("IHOP - Plano #3100").
       for (const digits of (name || "").match(/\d{3,}/g) || []) {
         const key = digits.replace(/^0+/, "");
-        if (byNumber.has(key)) return byNumber.get(key);
+        if (byNumber.has(key)) return place(byNumber.get(key), m);
       }
       if (!allowCreate || !(name || number) || !m.region || !m.area) return null;
       const regionName = String(m.region).trim();
@@ -262,7 +293,7 @@ function fillAllDayRows(keys) {
 }
 
 // ---- the one entry point ---------------------------------------------------------------------
-function logIngest(entry) {
+export function logIngest(entry) {
   db.prepare(`INSERT INTO ingest_file (received_at, channel, filename, sender, kind, profile_name, imported, skipped, first_date, last_date, status, detail)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(new Date().toISOString(), entry.channel, entry.filename || null, entry.sender || null, entry.kind || null,
     entry.profile_name || null, entry.imported || 0, entry.skipped || 0, entry.first_date || null, entry.last_date || null, entry.status, entry.detail ? String(entry.detail).slice(0, 1500) : null);
@@ -308,9 +339,12 @@ export function ingestFile(buffer, opts = {}) {
   const missing = missingRequirements(kind, mapping);
   if (!table.rows.length || missing.length) {
     const why = !table.rows.length ? "The file has no data rows" : `Couldn't find ${missing.join(" and ")}. Map the columns once under Data and refresh and this layout will import by itself from then on.`;
+    // A file that arrived by itself is kept, so the layout can be fixed from the dashboard
+    // without anyone exporting it again. Uploads are not kept: the person still has the file.
+    const pending = channel !== "upload" && opts.keep !== false && table.rows.length ? keepPending(buffer, channel, opts.filename) : null;
     logIngest({ ...base, kind, status: "needs_mapping", detail: `${why} Columns seen: ${table.headers.join(", ")}` });
     audit(opts.userEmail, "import_needs_mapping", `${opts.filename || channel}: ${why}`);
-    return { imported: 0, skipped: table.rows.length, status: "needs_mapping", kind, errors: [why], headers: table.headers };
+    return { imported: 0, skipped: table.rows.length, status: "needs_mapping", kind, errors: [why], headers: table.headers, pending };
   }
 
   const fallbackDay = mapping.date ? null : dayInText(table.titleText) || dayInText(opts.filename) || (channel === "upload" ? null : addDays(today(), -1));
@@ -380,10 +414,13 @@ export function ingestFile(buffer, opts = {}) {
   if (opts.saveProfileAs && imported) saveProfile({ name: opts.saveProfileAs, kind, headers: table.headers, mapping, userEmail: opts.userEmail });
   if (profile && imported) db.prepare("UPDATE import_profile SET last_used_at = ? WHERE profile_id = ?").run(new Date().toISOString(), profile.profile_id);
 
-  const status = imported === 0 ? "rejected" : errors.length ? "partial" : "ok";
+  // Nothing imported from a file that arrived by itself: usually a column the importer didn't
+  // recognise (a region or area column under another name). Keep it, like an unknown layout.
+  const pending = imported === 0 && channel !== "upload" && opts.keep !== false && table.rows.length ? keepPending(buffer, channel, opts.filename) : null;
+  const status = imported === 0 ? (pending ? "needs_mapping" : "rejected") : errors.length ? "partial" : "ok";
   logIngest({ ...base, kind, profile_name: opts.saveProfileAs || profile?.name, imported, skipped: errors.length, first_date: firstDate, last_date: lastDate, status, detail: errors.slice(0, 8).join(" | ") });
   audit(opts.userEmail, `import_${kind}`, `${channel} ${opts.filename || ""}: ${imported} rows, ${errors.length} skipped`);
-  return { imported, skipped: errors.length, status, kind, first_date: firstDate, last_date: lastDate, errors: errors.slice(0, 25), newRestaurants: resolver.created, clearedDemoData, profile: opts.saveProfileAs || profile?.name || null };
+  return { imported, skipped: errors.length, status, kind, first_date: firstDate, last_date: lastDate, errors: errors.slice(0, 25), newRestaurants: resolver.created, clearedDemoData, profile: opts.saveProfileAs || profile?.name || null, pending };
 }
 
 /**
@@ -393,6 +430,7 @@ export function ingestFile(buffer, opts = {}) {
 export function importDropFolder() {
   const dir = importFolder();
   fs.mkdirSync(dir, { recursive: true });
+  const retried = retryPending();
   // Sales/labor files first: they are what introduces restaurants a guest file refers to.
   const looksGuest = (f) => /guest|review|survey/i.test(f);
   const files = fs.readdirSync(dir).filter((f) => /\.(csv|xlsx|xls)$/i.test(f)).sort((a, b) => looksGuest(a) - looksGuest(b) || a.localeCompare(b));
@@ -410,13 +448,73 @@ export function importDropFolder() {
       results.push({ file, error: e.message });
     }
   }
-  return { configured: true, files: results };
+  return { configured: true, files: [...retried, ...results] };
 }
 
 /** Watched folder: IMPORT_DIR if set (relative paths are relative to the server folder), otherwise server/import. */
+// ---- files waiting for a layout ---------------------------------------------------------------
+// Kept under <reports folder>/needs-mapping as "<time>__<channel>__<name>". They are retried on
+// every refresh once a matching layout exists, or fixed by hand from Data and refresh.
+export const pendingDir = () => path.join(importFolder(), "needs-mapping");
+const safeName = (name) => String(name || "report").replace(/[^\w.\- ]+/g, "_").slice(0, 120);
+
+function keepPending(buffer, channel, filename) {
+  fs.mkdirSync(pendingDir(), { recursive: true });
+  const name = `${Date.now()}__${channel}__${safeName(filename)}`;
+  fs.writeFileSync(path.join(pendingDir(), name), buffer);
+  return name;
+}
+
+const pendingPath = (name) => {
+  if (!/^\d+__[a-z_]+__[^/\\]+$/.test(name)) throw new Error("Unknown file");
+  return path.join(pendingDir(), name);
+};
+
+export function listPending() {
+  if (!fs.existsSync(pendingDir())) return [];
+  return fs.readdirSync(pendingDir()).filter((n) => /^\d+__/.test(n)).sort().map((name) => {
+    const [stamp, channel, ...rest] = name.split("__");
+    return { name, channel, filename: rest.join("__"), received_at: new Date(Number(stamp)).toISOString() };
+  });
+}
+
+export function readPending(name) {
+  return fs.readFileSync(pendingPath(name));
+}
+
+export function removePending(name) {
+  fs.rmSync(pendingPath(name), { force: true });
+}
+
+/** Imports one kept file with the columns chosen in the dashboard; on success it is no longer pending. */
+export function importPending(name, opts) {
+  const { channel, filename } = listPending().find((p) => p.name === name) || {};
+  if (!channel) throw new Error("That file is no longer waiting");
+  const result = ingestFile(readPending(name), { ...opts, channel, filename, keep: false });
+  if (result.imported > 0) removePending(name);
+  return result;
+}
+
+/** On every refresh: kept files whose layout has since been saved import by themselves. */
+export function retryPending() {
+  const results = [];
+  for (const p of listPending()) {
+    let buffer;
+    try { buffer = readPending(p.name); } catch { continue; }
+    let headers;
+    try { headers = readTable(buffer).headers; } catch { removePending(p.name); continue; }
+    if (!findProfile(headers)) continue;
+    const result = ingestFile(buffer, { channel: p.channel, filename: p.filename, keep: false });
+    if (result.imported > 0) removePending(p.name);
+    results.push({ file: p.filename, imported: result.imported, skipped: result.skipped, status: result.status });
+  }
+  return results;
+}
+
 export function importFolder() {
   const serverDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
-  return path.resolve(serverDir, process.env.IMPORT_DIR || "import");
+  // Chosen in the dashboard or by IMPORT_DIR; an installed copy defaults to a folder the person can see.
+  return path.resolve(serverDir, connectionValue("import_dir") || process.env.OPS_DEFAULT_IMPORT_DIR || "import");
 }
 
 export function ingestLog(limit = 40) {

@@ -10,8 +10,11 @@ import { evaluateHotspots, hotspotsByCategory, hotspotCounts, CATEGORIES, UNUSUA
 import { buildDailySummary, storedDailySummary } from "./summary.js";
 import { forecastForm, forecastRollup, saveForecast, nextWeekStart } from "./forecast.js";
 import crypto from "crypto";
-import { ingestFile, previewFile, listProfiles, deleteProfile, templateWorkbook } from "./imports.js";
+import { ingestFile, previewFile, listProfiles, deleteProfile, templateWorkbook, listPending, readPending, removePending, importPending } from "./imports.js";
 import { runRefresh, refreshStatus, startScheduler, dataFreshness } from "./refresh.js";
+import { describeConnections, saveConnectionValues } from "./connections.js";
+import { testRosnet, rosnetConfig } from "./sources/rosnet.js";
+import { testMailbox, mailboxConfig } from "./mailbox.js";
 import { storeDailySummary } from "./summary.js";
 import { weatherContext } from "./weather.js";
 import { addDays, comparableLastYear, fiscalPeriod, isDay, today, weekStart, yesterday, prettyDate } from "./dates.js";
@@ -279,6 +282,46 @@ app.put("/api/refresh/settings", requireRole("executive"), (req, res) => {
   res.json(refreshStatus());
 });
 
+// ---- connections (executive only): the automatic inputs, set up in the dashboard ---------
+// Secrets are write-only: responses say whether one is on file, never what it is.
+const setupStatus = () => {
+  const count = (sql) => db.prepare(sql).get().n;
+  const realStores = count("SELECT COUNT(*) n FROM restaurant WHERE is_demo = 0");
+  // Reports landing by folder or push in the last few days count as connected too.
+  const arriving = count("SELECT COUNT(*) n FROM ingest_file WHERE channel IN ('folder', 'push', 'mailbox') AND imported > 0 AND received_at > datetime('now', '-3 days')") > 0;
+  return {
+    connected: rosnetConfig().configured || (mailboxConfig().configured && mailboxConfig().allowed.length > 0) || arriving,
+    rosnet_api: rosnetConfig().configured,
+    mailbox: mailboxConfig().configured,
+    trusted_senders: mailboxConfig().allowed.length > 0,
+    restaurants: realStores,
+    unassigned: count("SELECT COUNT(*) n FROM restaurant r JOIN area a ON a.area_id = r.area_id WHERE r.is_demo = 0 AND a.area_name = 'Unassigned'"),
+    results: count("SELECT COUNT(*) n FROM daily_performance p JOIN restaurant r USING (restaurant_id) WHERE r.is_demo = 0 AND p.actual_sales IS NOT NULL") > 0,
+    forecasts: count("SELECT COUNT(*) n FROM daily_performance p JOIN restaurant r USING (restaurant_id) WHERE r.is_demo = 0 AND p.forecast_sales IS NOT NULL") > 0,
+    layouts: count("SELECT COUNT(*) n FROM import_profile"),
+    pending: listPending().length,
+  };
+};
+
+app.get("/api/connections", requireRole("executive"), (_req, res) => res.json({ fields: describeConnections(), setup: setupStatus() }));
+
+app.put("/api/connections", requireRole("executive"), (req, res) => {
+  const saved = saveConnectionValues(req.body || {});
+  audit(req.user.email, "connections_changed", saved.join(", ")); // names only, never values
+  res.json({ fields: describeConnections(), setup: setupStatus() });
+});
+
+app.post("/api/connections/test/:which", requireRole("executive"), async (req, res) => {
+  const b = req.body || {};
+  try {
+    if (req.params.which === "rosnet") return res.json({ ok: true, ...(await testRosnet({ user: b.rosnet_api_user, key: b.rosnet_api_key, clientId: b.rosnet_client_id })) });
+    if (req.params.which === "mailbox") return res.json({ ok: true, ...(await testMailbox({ user: b.reports_imap_user, password: b.reports_imap_password, host: b.reports_imap_host, port: b.reports_imap_port })) });
+    return res.status(404).json({ error: "Unknown connection" });
+  } catch (e) {
+    return res.json({ ok: false, error: e.message });
+  }
+});
+
 // ---- imports (executive only) -----------------------------------------------------------
 // Step 1: look at a file. Returns the layout found, the column mapping and what is missing.
 app.post("/api/import/preview", requireRole("executive"), upload.single("file"), (req, res) => {
@@ -305,6 +348,31 @@ app.post("/api/import/commit", requireRole("executive"), upload.single("file"), 
     audit(req.user.email, "import_error", e.message);
     res.status(400).json({ error: `Couldn't import that file: ${e.message}` });
   }
+});
+
+// Files that arrived by email, folder or push in a layout nobody has mapped yet. They are fixed
+// here with the same two steps, so nobody has to export the report again.
+app.get("/api/import/pending", requireRole("executive"), (_req, res) => res.json(listPending()));
+app.post("/api/import/pending/:name/preview", requireRole("executive"), (req, res) => {
+  try {
+    res.json(previewFile(readPending(req.params.name), { kind: ["performance", "guest"].includes(req.body?.kind) ? req.body.kind : null }));
+  } catch (e) {
+    res.status(400).json({ error: `Couldn't read that file: ${e.message}` });
+  }
+});
+app.post("/api/import/pending/:name/commit", requireRole("executive"), (req, res) => {
+  try {
+    res.json(importPending(req.params.name, {
+      userEmail: req.user.email, kind: ["performance", "guest"].includes(req.body?.kind) ? req.body.kind : null,
+      mapping: req.body?.mapping || null, saveProfileAs: req.body?.profileName ? String(req.body.profileName).slice(0, 80) : null,
+    }));
+  } catch (e) {
+    audit(req.user.email, "import_error", e.message);
+    res.status(400).json({ error: `Couldn't import that file: ${e.message}` });
+  }
+});
+app.delete("/api/import/pending/:name", requireRole("executive"), (req, res) => {
+  try { removePending(req.params.name); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 app.get("/api/import/profiles", requireRole("executive"), (_req, res) => res.json(listProfiles()));
@@ -369,7 +437,9 @@ app.use((err, _req, res, _next) => {
 });
 
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => {
+// OPS_HOST=127.0.0.1 keeps the dashboard to this computer, which is how the installed apps
+// start (no firewall prompt). Unset, it is reachable from the network, as a hosted copy must be.
+app.listen(PORT, process.env.OPS_HOST || undefined, () => {
   console.log(`IHOP Operations Dashboard running at http://localhost:${PORT}`);
   if (db.prepare("SELECT COUNT(*) n FROM app_user").get().n === 0) console.log("No accounts yet. Open the address above in a browser to create the administrator account.");
   startScheduler();

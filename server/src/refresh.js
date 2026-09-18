@@ -4,11 +4,12 @@
 //   - manual refresh from the dashboard
 // Every run is recorded with per-step results so failures are visible, not silent.
 import db, { getSetting, audit } from "./db.js";
-import { addDays, today, yesterday } from "./dates.js";
+import { addDays, isoDate, today, yesterday } from "./dates.js";
 import { refreshWeather } from "./weather.js";
-import { importDropFolder, ingestLog, importFolder } from "./imports.js";
+import { importDropFolder, ingestLog, importFolder, listPending } from "./imports.js";
 import { importMailbox, mailboxConfig } from "./mailbox.js";
 import { catchUp, generateLive } from "./sources/demo.js";
+import { syncRosnet, rosnetConfig } from "./sources/rosnet.js";
 import { storeDailySummary, storedDailySummary } from "./summary.js";
 
 let running = null;
@@ -49,10 +50,10 @@ export function runRefresh(trigger, { userEmail = null } = {}) {
     const runId = Number(db.prepare("INSERT INTO refresh_run (started_at, trigger) VALUES (?, ?)").run(new Date().toISOString(), trigger).lastInsertRowid);
     const steps = [];
     const light = trigger === "intraday";
-    const demo = getSetting("data_source") === "demo";
-
     await step(steps, "Import exported files", () => importDropFolder());
     if (mailboxConfig().configured) await step(steps, "Import emailed reports", () => importMailbox());
+    // After the files, so on a first run a store list has already put restaurants in their areas.
+    if (rosnetConfig().configured) await step(steps, "Rosnet API: sales and labor", () => syncRosnet({ light }));
     if (!light) await step(steps, "Locate restaurants for weather", () => geocodeMissing());
 
     // Weather first: in demo mode the day's sales respond to it.
@@ -65,12 +66,14 @@ export function runRefresh(trigger, { userEmail = null } = {}) {
         return out;
       });
     }
-    if (demo) {
+    // Read after the imports: the first real data switches the dashboard out of demonstration mode.
+    if (getSetting("data_source") === "demo") {
       if (!light) await step(steps, "Prior-day results (demo source)", () => catchUp());
       await step(steps, "Live sales (demo source)", () => generateLive());
     }
     // Reports can land after the scheduled run, so any run that brought in new rows rewrites the summary.
-    const newRows = steps.flatMap((s) => [...(s.detail?.files || []), ...(s.detail?.messages || []).flatMap((m) => m.files || [])]).reduce((t, f) => t + (f.imported || 0), 0);
+    const newRows = steps.flatMap((s) => [...(s.detail?.files || []), ...(s.detail?.messages || []).flatMap((m) => m.files || [])]).reduce((t, f) => t + (f.imported || 0), 0)
+      + steps.reduce((t, s) => t + (s.detail?.rows || 0), 0);
     if (newRows > 0 || (!light && (trigger === "scheduled_daily" || !storedDailySummary(yesterday())))) {
       await step(steps, "Daily morning summary", () => {
         const s = storeDailySummary(yesterday());
@@ -98,12 +101,13 @@ export function dataFreshness() {
   const lastFinal = db.prepare("SELECT MAX(date) d FROM daily_performance WHERE is_final = 1 AND daypart = 'all'").get().d;
   const lastGuest = db.prepare("SELECT MAX(date) d FROM guest_metrics").get().d;
   const lastFile = db.prepare("SELECT received_at, channel, filename, status FROM ingest_file ORDER BY ingest_id DESC LIMIT 1").get() || null;
-  const needsMapping = db.prepare("SELECT COUNT(*) n FROM ingest_file WHERE status = 'needs_mapping' AND received_at > ?").get(new Date(Date.now() - 3 * 864e5).toISOString()).n;
+  const needsMapping = listPending().length;
   const now = new Date();
   const clock = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
   const due = clock >= getSetting("daily_refresh_time");
   const demo = getSetting("data_source") === "demo";
-  const missingDay = !demo && due && (!lastFinal || lastFinal < expected);
+  // Only once results have been arriving: a new install with nothing on file is being set up, not failing.
+  const missingDay = !demo && due && Boolean(lastFinal) && lastFinal < expected;
   return {
     expected_day: expected, last_final_day: lastFinal, last_guest_day: lastGuest, last_file: lastFile,
     stale: missingDay, files_needing_mapping: needsMapping,
@@ -128,6 +132,7 @@ export function refreshStatus() {
     import_folder: importFolder(),
     mailbox: (({ configured, host, user, folder, allowed }) => ({ configured, host, user, folder, allowed }))(mailboxConfig()),
     push_enabled: Boolean(process.env.INGEST_TOKEN),
+    rosnet_api: (({ configured, user, clientId, baseUrl }) => ({ configured, user: configured ? user : null, client_id: clientId || null, host: baseUrl.replace(/^https?:\/\//, "") }))(rosnetConfig()),
     freshness: dataFreshness(),
     files: ingestLog(30),
   };
@@ -135,25 +140,40 @@ export function refreshStatus() {
 
 const hhmm = (d) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 
+/**
+ * Decides what a scheduler tick should run. The daily refresh is due from its set time until
+ * the end of the day, not only at that exact minute: a Mac that was asleep, shut, or started
+ * late catches up as soon as it is running again. Exported so the rule can be tested.
+ */
+export function dueRefresh(state, now, settings) {
+  const clock = hhmm(now);
+  const day = isoDate(now);
+  if (clock >= settings.daily_refresh_time && state.lastDailyRun !== day) return "scheduled_daily";
+  const minutes = Math.max(5, Number(settings.intraday_refresh_minutes) || 15);
+  const open = clock >= settings.operating_hours_start && clock <= settings.operating_hours_end;
+  if (settings.intraday_refresh_enabled === "1" && open && now.getTime() - state.lastIntraday >= minutes * 60000) return "intraday";
+  return null;
+}
+
+const schedulerSettings = () => ({
+  daily_refresh_time: getSetting("daily_refresh_time"), intraday_refresh_enabled: getSetting("intraday_refresh_enabled"),
+  intraday_refresh_minutes: getSetting("intraday_refresh_minutes"), operating_hours_start: getSetting("operating_hours_start"), operating_hours_end: getSetting("operating_hours_end"),
+});
+
+/**
+ * The refresh that runs as the server starts is a full one, so it stands in for today's
+ * daily refresh when the start comes after the scheduled time.
+ */
 export function startScheduler() {
-  let lastDailyRun = null;
-  let lastIntraday = Date.now();
+  const now = new Date();
+  const state = { lastDailyRun: hhmm(now) >= getSetting("daily_refresh_time") ? isoDate(now) : null, lastIntraday: now.getTime() };
   const tick = () => {
-    const now = new Date();
-    const clock = hhmm(now);
-    const day = today();
-    if (clock === getSetting("daily_refresh_time") && lastDailyRun !== day) {
-      lastDailyRun = day;
-      lastIntraday = Date.now();
-      runRefresh("scheduled_daily").catch(() => {});
-      return;
-    }
-    const minutes = Math.max(5, Number(getSetting("intraday_refresh_minutes")) || 15);
-    const open = clock >= getSetting("operating_hours_start") && clock <= getSetting("operating_hours_end");
-    if (getSetting("intraday_refresh_enabled") === "1" && open && Date.now() - lastIntraday >= minutes * 60000) {
-      lastIntraday = Date.now();
-      runRefresh("intraday").catch(() => {});
-    }
+    const at = new Date();
+    const trigger = dueRefresh(state, at, schedulerSettings());
+    if (!trigger) return;
+    if (trigger === "scheduled_daily") state.lastDailyRun = isoDate(at);
+    state.lastIntraday = at.getTime();
+    runRefresh(trigger).catch(() => {});
   };
   return setInterval(tick, 30000);
 }

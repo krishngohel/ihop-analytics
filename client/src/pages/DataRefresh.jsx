@@ -2,20 +2,21 @@ import { useEffect, useMemo, useState } from "react";
 import { useApp } from "../appContext.jsx";
 import { getRefreshStatus, saveRefreshSettings, getImportProfiles, deleteImportProfile, getUsers, createUser, setUserActive, getAudit } from "../api.js";
 import ImportWizard from "../components/ImportWizard.jsx";
-import { Loading } from "../components/Bits.jsx";
+import Connections from "../components/Connections.jsx";
+import { Loading, ToneBadge } from "../components/Bits.jsx";
 import { prettyTime } from "../format.js";
 
 const TRIGGER = { manual: "Manual", scheduled_daily: "Scheduled daily", intraday: "Intraday", startup: "Server start" };
 const RUN_TONE = { ok: "ok", partial: "watch", failed: "attention", running: "neutral" };
 
-const CHANNEL = { upload: "Upload", folder: "Watched folder", mailbox: "Reports mailbox", push: "Push endpoint" };
+const CHANNEL = { upload: "Upload", folder: "Watched folder", mailbox: "Reports mailbox", push: "Push endpoint", rosnet_api: "Rosnet API" };
 const FILE_TONE = { ok: "ok", partial: "watch", needs_mapping: "attention", rejected: "attention" };
 const FILE_LABEL = { ok: "Imported", partial: "Imported with skips", needs_mapping: "Needs column mapping", rejected: "Rejected" };
 
 function Channel({ title, on, status, children }) {
   return (
     <div className={`channel ${on ? "on" : ""}`}>
-      <div className="channel-head"><strong>{title}</strong><span className={`status-badge tone-${on ? "ok" : "neutral"}`}>{status}</span></div>
+      <div className="channel-head"><strong>{title}</strong><ToneBadge tone={on ? "ok" : "neutral"}>{status}</ToneBadge></div>
       <p className="muted">{children}</p>
     </div>
   );
@@ -23,27 +24,29 @@ function Channel({ title, on, status, children }) {
 
 // The ways Rosnet and Merchant Centric STARS can feed the dashboard with nobody logging in to
 // either. Whichever the vendor supports is switched on with environment settings on the server.
-function AutomaticInputs({ status }) {
+function AutomaticInputs({ status, isExec }) {
   const f = status.freshness;
   return (
     <div className="card">
-      <h3>Automatic data inputs</h3>
-      <p className="muted" style={{ marginTop: -6 }}>
-        Rosnet (sales, labor, forecasts) and Merchant Centric STARS (reviews and guest ratings) send their scheduled reports here. The dashboard never signs in to either system and holds no vendor passwords. Every refresh, including the scheduled ones, checks all active channels.
-      </p>
+      <h3>{isExec ? "Data status" : "Automatic data inputs"}</h3>
+      {!isExec && (
+        <p className="muted card-sub">
+          Rosnet (sales, labor, forecasts) is read through its API, and both Rosnet and Merchant Centric STARS (reviews and guest ratings) can send scheduled reports here. The dashboard never signs in to either website. An administrator sets these up.
+        </p>
+      )}
       {f.stale && <div className="alert err"><strong>{f.message}</strong> Check that the scheduled reports are still being sent.</div>}
-      {f.files_needing_mapping > 0 && <div className="alert warn">{f.files_needing_mapping} received file{f.files_needing_mapping === 1 ? "" : "s"} could not be read because the layout is new. Import one copy below and save its layout.</div>}
-      <div className="channels">
+      {f.files_needing_mapping > 0 && <div className="alert warn">{f.files_needing_mapping} received file{f.files_needing_mapping === 1 ? "" : "s"} could not be read because the layout is new. Fix the columns under Reports and layouts below; the file is waiting there.</div>}
+      {!isExec && <div className="channels">
+        <Channel title="Rosnet API" on={Boolean(status.rosnet_api?.configured)} status={status.rosnet_api?.configured ? "Connected" : "Not set up"}>
+          Net sales (live through the day), last year, worked and scheduled labor, and the store list, straight from Rosnet on every refresh.
+        </Channel>
         <Channel title="Reports mailbox" on={status.mailbox.configured} status={status.mailbox.configured ? `Reading ${status.mailbox.user}` : "Not set up"}>
-          In Rosnet and STARS, schedule the daily reports to email a dedicated inbox. Attachments from trusted senders{status.mailbox.allowed.length ? ` (${status.mailbox.allowed.join(", ")})` : ""} are imported. Server settings: REPORTS_IMAP_HOST, REPORTS_IMAP_USER, REPORTS_IMAP_PASSWORD, REPORTS_ALLOWED_SENDERS.
+          Rosnet and STARS email their scheduled reports to a dedicated inbox. Attachments from trusted senders are imported.
         </Channel>
-        <Channel title="Watched folder" on={Boolean(status.import_folder)} status={status.import_folder ? `Watching ${status.import_folder}` : "Not set up"}>
-          For scheduled exports delivered by SFTP, a synced drive or a vendor agent. Files are imported, then moved to processed or rejected. Server setting: IMPORT_DIR.
+        <Channel title="Reports folder" on={Boolean(status.import_folder)} status="Watching">
+          Reports saved into the dashboard's folder are imported, then moved to processed or rejected.
         </Channel>
-        <Channel title="Push endpoint" on={status.push_enabled} status={status.push_enabled ? "Accepting files" : "Not set up"}>
-          For a vendor API job, webhook or integration tool: POST report files to /api/ingest with a bearer token. The token can add data, never read it. Server setting: INGEST_TOKEN.
-        </Channel>
-      </div>
+      </div>}
       <p className="muted">Latest complete business day on file: <strong>{f.last_final_day || "none"}</strong> · guest metrics through <strong>{f.last_guest_day || "none"}</strong>{f.last_file ? ` · last file received ${prettyTime(f.last_file.received_at)} via ${CHANNEL[f.last_file.channel] || f.last_file.channel}` : ""}</p>
     </div>
   );
@@ -63,7 +66,7 @@ function FilesReceived({ files }) {
                 <td>{x.filename}</td><td>{x.kind === "guest" ? "Guest metrics" : x.kind === "performance" ? "Sales / labor" : "-"}</td><td>{x.profile_name || "Standard columns"}</td>
                 <td className="num money">{x.imported}{x.skipped ? <span className="neutral"> (+{x.skipped} skipped)</span> : null}</td>
                 <td>{x.first_date ? (x.first_date === x.last_date ? x.first_date : `${x.first_date} to ${x.last_date}`) : "-"}</td>
-                <td><span className={`status-badge tone-${FILE_TONE[x.status] || "neutral"}`}>{FILE_LABEL[x.status] || x.status}</span>{x.detail && x.status !== "ok" ? <div className="cell-sub wrap">{x.detail}</div> : null}</td>
+                <td><ToneBadge tone={FILE_TONE[x.status] || "neutral"}>{FILE_LABEL[x.status] || x.status}</ToneBadge>{x.detail && x.status !== "ok" ? <div className="cell-sub wrap">{x.detail}</div> : null}</td>
               </tr>
             ))}</tbody>
           </table>
@@ -81,7 +84,7 @@ function Layouts({ version }) {
   return (
     <div className="card">
       <h3>Saved report layouts</h3>
-      <p className="muted" style={{ marginTop: -6 }}>Reports in these layouts import automatically.</p>
+      <p className="muted card-sub">Reports in these layouts import automatically.</p>
       <table className="ledger small">
         <thead><tr><th>Layout</th><th>Type</th><th>Columns used</th><th>Last used</th><th /></tr></thead>
         <tbody>{profiles.map((p) => (
@@ -119,7 +122,7 @@ function Users({ meta }) {
   return (
     <div className="card">
       <h3>People and access</h3>
-      <p className="muted" style={{ marginTop: -6 }}>Executives see every restaurant. Region, area and store users see only their own, including on the forecasting form.</p>
+      <p className="muted card-sub">Executives see every restaurant. Region, area and store users see only their own, including on the forecasting form.</p>
       {!users ? <Loading /> : (
         <div className="table-scroll">
           <table className="ledger small">
@@ -173,14 +176,13 @@ export default function DataRefresh() {
   if (!status) return <Loading />;
   return (
     <div>
-      <h2>Data and refresh</h2>
-
+      {isExec && <Connections status={status} reload={load} version={layoutVersion + dataVersion} />}
       <div className="card">
         <div className="card-header">
           <h3>Refresh</h3>
           <button type="button" className="btn" onClick={() => refreshNow().then(load)} disabled={refreshing}>{refreshing ? "Refreshing…" : "Refresh now"}</button>
         </div>
-        <p className="muted" style={{ marginTop: -6 }}>
+        <p className="muted card-sub">
           Final prior-day results, weather and the morning summary load on the daily schedule. Live sales refresh through the day while restaurants are open. Anyone can refresh by hand before a review.
         </p>
         <div className="settings-grid">
@@ -193,12 +195,12 @@ export default function DataRefresh() {
         </div>
       </div>
 
-      <AutomaticInputs status={status} />
+      <AutomaticInputs status={status} isExec={isExec} />
 
       {isExec && (
         <div className="card">
           <h3>Reports and layouts</h3>
-          <ImportWizard onDone={() => { reloadMeta(); load(); setLayoutVersion((v) => v + 1); }} />
+          <ImportWizard version={dataVersion} onDone={() => { reloadMeta(); load(); setLayoutVersion((v) => v + 1); }} />
         </div>
       )}
       {isExec && <Layouts version={layoutVersion} />}
@@ -212,7 +214,7 @@ export default function DataRefresh() {
             <tbody>{status.runs.map((r) => (
               <tr key={r.run_id}>
                 <td>{prettyTime(r.started_at)}</td><td>{TRIGGER[r.trigger] || r.trigger}</td>
-                <td><span className={`status-badge tone-${RUN_TONE[r.status] || "neutral"}`}>{r.status}</span></td>
+                <td><ToneBadge tone={RUN_TONE[r.status] || "neutral"}>{r.status}</ToneBadge></td>
                 <td>{r.steps.map((s) => <div key={s.name} className={s.ok ? "" : "negative"}>{s.ok ? "✓" : "✕"} {s.name}{s.ok ? "" : `: ${s.error}`} <span className="neutral">({s.ms} ms)</span></div>)}</td>
               </tr>
             ))}</tbody>
@@ -225,7 +227,7 @@ export default function DataRefresh() {
       {isExec && audit && (
         <div className="card">
           <h3>Audit log</h3>
-          <p className="muted" style={{ marginTop: -6 }}>Sign-ins, imports, refreshes and errors. Most recent 200.</p>
+          <p className="muted card-sub">Sign-ins, imports, refreshes and errors. Most recent 200.</p>
           <div className="table-scroll tall">
             <table className="ledger small">
               <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Detail</th></tr></thead>

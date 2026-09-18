@@ -44,6 +44,11 @@ export const createUser = (body) => sendJSON("POST", "/api/admin/users", body);
 export const setUserActive = (id, is_active) => sendJSON("PATCH", `/api/admin/users/${id}`, { is_active });
 export const getAudit = () => getJSON("/api/admin/audit");
 
+// Connections: secrets go up and never come back; the response says only whether one is on file.
+export const getConnections = () => getJSON("/api/connections");
+export const saveConnections = (body) => sendJSON("PUT", "/api/connections", body);
+export const testConnection = (which, body) => sendJSON("POST", `/api/connections/test/${which}`, body);
+
 // Imports: look at a file first, then commit it (optionally saving the column mapping as a profile).
 export async function previewImport(file, kind) {
   const fd = new FormData();
@@ -62,4 +67,10 @@ export async function commitImport(file, { kind, mapping, profileName }) {
 }
 
 export const getImportProfiles = () => getJSON("/api/import/profiles");
+
+// Files that arrived by email, folder or push in a layout nobody has mapped yet.
+export const getPendingImports = () => getJSON("/api/import/pending");
+export const previewPending = (name, kind) => sendJSON("POST", `/api/import/pending/${encodeURIComponent(name)}/preview`, { kind });
+export const commitPending = (name, { kind, mapping, profileName }) => sendJSON("POST", `/api/import/pending/${encodeURIComponent(name)}/commit`, { kind, mapping, profileName });
+export const discardPending = (name) => request(`/api/import/pending/${encodeURIComponent(name)}`, { method: "DELETE" });
 export const deleteImportProfile = (id) => request(`/api/import/profiles/${id}`, { method: "DELETE" });

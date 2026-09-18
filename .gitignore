@@ -7,3 +7,4 @@ server/import/
 .DS_Store
 server/.env
 release/
+server/.secret-key

@@ -41,23 +41,36 @@ Sources: **Rosnet** (sales, labor, forecasts) and **Merchant Centric STARS** (re
 
 Working today, all unattended once set up:
 
-- **Reports mailbox**: the vendors email their scheduled reports to a dedicated inbox; attachments from trusted senders are imported on every refresh (`REPORTS_IMAP_*`, `REPORTS_ALLOWED_SENDERS`).
-- **Watched folder**: set `IMPORT_DIR`. Every refresh imports any `.csv`/`.xlsx` in it, then moves it to `processed/` or `rejected/`.
+- **Rosnet API** (preferred): enter the API User ID and Key under Data and refresh > Connections (issued by api@rosnet.com; not a website sign-in). Every refresh pulls net sales (live and final), last-year sales, worked and scheduled labor, and the store list from `api.rosnet.com`. Forecast sales and allowable hours are not in the API, so that one report still comes by one of the channels below and merges with the API's rows.
+- **Reports mailbox**: the vendors email their scheduled reports to a dedicated inbox; attachments from trusted senders are imported on every refresh. Set up under Data and refresh > Connections, with a Test button that lists recent senders.
+- **Reports folder**: every refresh imports any `.csv`/`.xlsx` in it, then moves it to `processed/` or `rejected/`.
 - **Push endpoint**: `POST /api/ingest` with `Authorization: Bearer $INGEST_TOKEN`, for a vendor API job or integration tool.
 - **Saved report layouts**: upload one copy of a report under Data and refresh, check the column matches, save the layout. That layout then imports by itself from any channel. Title rows, abbreviated headers ("Net Sls", "Fcst"), total lines, a missing date column, and sales and labor arriving as separate reports are all handled. STARS works as a location summary or a one-row-per-review export.
 - **Missing-data alerts**: if the prior business day hasn't arrived by the daily refresh time, every page says so.
 - New restaurants are created from the export when it has Region and Area columns. Restaurants with a city and state are geocoded automatically so weather works.
 - The first real import clears the demonstration data.
 
-An API connector for Rosnet or the guest platform would call the same two functions the importers use (`savePerformance`, `saveGuestMetrics` in `server/src/performance.js`), so nothing downstream changes.
+The Rosnet API connector (`server/src/sources/rosnet.js`) writes through the same function the importers use (`savePerformance` in `server/src/performance.js`), so nothing downstream changes. A guest-platform connector would do the same with `saveGuestMetrics`.
+
+Tests: `cd server && npm test` runs the connector against a stand-in for the Rosnet API, and checks report dates import as written.
+
+## Installers
+
+`packaging/build-mac.sh` builds a drag-to-Applications `.dmg`; `packaging/build-windows.ps1` builds a per-user Windows setup program. Both bundle Node and a menu bar / tray launcher, keep data outside the app, and need no terminal. The client's steps are in `INSTALL.md`.
 
 ## Configuration
+
+Connections (Rosnet API, reports mailbox, reports folder) are set in the dashboard and stored in the database, secrets encrypted with a key file beside it (`server/src/connections.js`). The environment variables below are for hosted installs and win over the saved values.
 
 | Variable | Purpose |
 |---|---|
 | `PORT` | Port to listen on (default 4000) |
 | `OPS_DB_PATH` | SQLite file location (default `server/ops.db`). Put it on a persistent disk when hosting. |
+| `ROSNET_API_USER`, `ROSNET_API_KEY`, `ROSNET_CLIENT_ID` | Rosnet API credentials (see `docs/connecting-rosnet-and-stars.md`) |
+| `REPORTS_IMAP_HOST`, `REPORTS_IMAP_USER`, `REPORTS_IMAP_PASSWORD`, `REPORTS_ALLOWED_SENDERS` | Reports mailbox |
 | `IMPORT_DIR` | Scheduled export drop folder |
+| `OPS_HOST` | Address to listen on. `127.0.0.1` keeps it to this computer (what the installed apps do); unset listens on the network |
+| `OPS_SECRET_KEY` | Key for the saved secrets, instead of the `.secret-key` file beside the database |
 | `COOKIE_SECURE=1` or `NODE_ENV=production` | Send the session cookie over HTTPS only |
 | `DEMO_PASSWORD` | Password for the seeded demo accounts |
 
