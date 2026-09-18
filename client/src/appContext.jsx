@@ -21,6 +21,7 @@ export function rangeForPreset(preset, meta) {
 
 export function AppProvider({ children }) {
   const [user, setUser] = useState(undefined); // undefined = checking, null = signed out
+  const [openAccess, setOpenAccess] = useState(false);
   const [meta, setMeta] = useState(null);
   // The chosen range survives a page reload (per tab), so a refresh doesn't lose your place.
   const [range, setRangeState] = useState(() => {
@@ -44,7 +45,7 @@ export function AppProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    getMe().then(({ user: u }) => setUser(u || null)).catch(() => setUser(null));
+    getMe().then(({ user: u, open_access }) => { setOpenAccess(Boolean(open_access)); setUser(u || null); }).catch(() => setUser(null));
     const onSignedOut = () => { setUser(null); setMeta(null); };
     window.addEventListener("ops:signed-out", onSignedOut);
     return () => window.removeEventListener("ops:signed-out", onSignedOut);
@@ -68,10 +69,10 @@ export function AppProvider({ children }) {
   }, [loadMeta]);
 
   const value = useMemo(() => ({
-    user, setUser, meta, range, setPreset, setCustomRange, setDaypart, refresh, refreshing, refreshNow, dataVersion, reloadMeta: loadMeta,
+    user, setUser, openAccess, meta, range, setPreset, setCustomRange, setDaypart, refresh, refreshing, refreshNow, dataVersion, reloadMeta: loadMeta,
     // Query params every data request shares.
     query: range.from ? { from: range.from, to: range.to, daypart: range.daypart } : null,
-  }), [user, meta, range, setPreset, setCustomRange, setDaypart, refresh, refreshing, refreshNow, dataVersion, loadMeta]);
+  }), [user, openAccess, meta, range, setPreset, setCustomRange, setDaypart, refresh, refreshing, refreshNow, dataVersion, loadMeta]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

@@ -5,7 +5,7 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import db, { DAYPARTS, DAYPART_LABELS, allSettings, setSetting, audit } from "./db.js";
-import { attachUser, requireAuth, requireRole, login, logout, publicUser, canAccess, createUser, generatePassword } from "./auth.js";
+import { attachUser, requireAuth, requireRole, login, logout, publicUser, canAccess, createUser, generatePassword, OPEN_ACCESS } from "./auth.js";
 import { metrics, companyTotals, dailySeries, weatherSummary, hierarchy, dataBounds } from "./analytics.js";
 import { evaluateHotspots, hotspotsByCategory, hotspotCounts, CATEGORIES, UNUSUAL_DROP_PCT, CRITICAL_SALES_PCT, CRITICAL_LABOR_PCT } from "./hotspots.js";
 import { buildDailySummary, storedDailySummary } from "./summary.js";
@@ -39,7 +39,7 @@ app.use(attachUser);
 app.post("/api/auth/login", login);
 app.post("/api/auth/logout", logout);
 const noUsersYet = () => db.prepare("SELECT COUNT(*) n FROM app_user").get().n === 0;
-app.get("/api/auth/me", (req, res) => res.json({ user: publicUser(req.user), needs_setup: noUsersYet() }));
+app.get("/api/auth/me", (req, res) => res.json({ user: publicUser(req.user), needs_setup: !OPEN_ACCESS && noUsersYet(), open_access: OPEN_ACCESS }));
 
 // Only works while there are no accounts at all. After that, executives add people under Data and refresh.
 app.post("/api/auth/setup", (req, res, next) => {
@@ -449,7 +449,8 @@ if (process.env.OPS_HOST === "127.0.0.1") {
 }
 app.listen(PORT, process.env.OPS_HOST || undefined, () => {
   console.log(`IHOP Operations Dashboard running at http://localhost:${PORT}`);
-  if (db.prepare("SELECT COUNT(*) n FROM app_user").get().n === 0) console.log("No accounts yet. Open the address above in a browser to create the administrator account.");
+  if (OPEN_ACCESS) console.log("Open access: no sign-in required (set OPS_REQUIRE_LOGIN=1 to require accounts).");
+  else if (db.prepare("SELECT COUNT(*) n FROM app_user").get().n === 0) console.log("No accounts yet. Open the address above in a browser to create the administrator account.");
   startScheduler();
   runRefresh("startup").catch((e) => console.error("Startup refresh failed:", e.message));
 });

@@ -4,6 +4,12 @@
 import crypto from "crypto";
 import db, { audit } from "./db.js";
 
+// A local desktop install has no login wall: every request is a built-in operator with
+// company-wide access, so the role-scoping below still applies (as executive = sees all).
+// A hosted or network-shared deployment restores real sign-in with OPS_REQUIRE_LOGIN=1.
+export const OPEN_ACCESS = process.env.OPS_REQUIRE_LOGIN !== "1";
+const OWNER = { user_id: 0, email: "operator@localhost", display_name: "Operator", role: "executive", scope_id: null };
+
 const COOKIE = "ops_session";
 const SESSION_DAYS = 14;
 const MAX_ATTEMPTS = 6;
@@ -81,6 +87,7 @@ export function logout(req, res) {
 }
 
 export function attachUser(req, _res, next) {
+  if (OPEN_ACCESS) { req.user = OWNER; return next(); }
   const token = readCookie(req, COOKIE);
   if (token) {
     req.user = db.prepare(`SELECT u.* FROM session s JOIN app_user u ON u.user_id = s.user_id

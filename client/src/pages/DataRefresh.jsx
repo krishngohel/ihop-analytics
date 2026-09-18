@@ -157,7 +157,7 @@ function Users({ meta }) {
 }
 
 export default function DataRefresh() {
-  const { user, meta, refreshNow, refreshing, reloadMeta, dataVersion } = useApp();
+  const { user, openAccess, meta, refreshNow, refreshing, reloadMeta, dataVersion } = useApp();
   const [status, setStatus] = useState(null);
   const [settings, setSettings] = useState(null);
   const [saved, setSaved] = useState(false);
@@ -222,7 +222,7 @@ export default function DataRefresh() {
         </div>
       </div>
 
-      {isExec && <Users meta={meta} />}
+      {isExec && !openAccess && <Users meta={meta} />}
 
       {isExec && audit && (
         <div className="card">

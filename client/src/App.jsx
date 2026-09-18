@@ -33,7 +33,7 @@ function sectionTitle(pathname, links) {
 }
 
 export default function App() {
-  const { user, setUser, meta, refresh, refreshing, refreshNow } = useApp();
+  const { user, setUser, openAccess, meta, refresh, refreshing, refreshNow } = useApp();
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { theme, toggle } = useTheme();
@@ -86,9 +86,11 @@ export default function App() {
             <button type="button" className="side-btn" onClick={toggle} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}>
               {theme === "dark" ? <SunIcon size={15} /> : <MoonIcon size={15} />}{theme === "dark" ? "Light" : "Dark"}
             </button>
-            <button type="button" className="side-btn" onClick={() => signOut().finally(() => { sessionStorage.clear(); navigate("/"); setUser(null); })}>
-              <SignOutIcon size={15} />Sign out
-            </button>
+            {!openAccess && (
+              <button type="button" className="side-btn" onClick={() => signOut().finally(() => { sessionStorage.clear(); navigate("/"); setUser(null); })}>
+                <SignOutIcon size={15} />Sign out
+              </button>
+            )}
           </div>
         </div>
       </aside>
