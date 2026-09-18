@@ -19,8 +19,9 @@ const LOCATIONS = {
   level3: { label: "Area", choices: [{ label: "ACGTX North", value: "ACGTX North", parentValue: "" }] },
   level2: { label: "Region", choices: [{ label: "Dallas", value: "Dallas", parentValue: "ACGTX North" }] },
   level1: { label: "Locations", choices: [
-    { label: "1404 -  Garland", value: "1404", parentValue: "Dallas" },
-    { label: "1413 -  Plano", value: "1413", parentValue: "Dallas" },
+    // value is an internal id, deliberately NOT the store number in the label.
+    { label: "1404 -  Garland", value: "94", parentValue: "Dallas" },
+    { label: "1413 -  Plano", value: "97", parentValue: "Dallas" },
   ] },
 };
 const bars = (a, b) => ({ labels: ["1404 -  Garland", "1413 -  Plano"], datasets: [a, b].filter(Boolean) });

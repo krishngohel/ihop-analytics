@@ -113,11 +113,16 @@ function pairFromBars(widget, aLabel, bLabel) {
  */
 async function syncLocations(cfg, token) {
   const f = await gateway(cfg, token, "getLocationFilters", svc("LocationFilter"));
-  const stores = (f.level1?.choices || []).map((c) => ({
-    id: Number(c.value), number: String(c.value),
-    name: String(c.label).replace(/^\s*\d+\s*-\s*/, "").trim() || `Store ${c.value}`,
-    area: c.parentValue || null, // level2
-  }));
+  // The store's real number is the prefix of its label ("648 - South San Francisco"), NOT the
+  // internal `value` (an unrelated location id) — every data widget keys on that store number.
+  const stores = (f.level1?.choices || []).map((c) => {
+    const number = Number(String(c.label).match(/^\s*(\d+)/)?.[1]);
+    return {
+      id: number, number: String(number),
+      name: String(c.label).replace(/^\s*\d+\s*-\s*/, "").trim() || `Store ${number}`,
+      area: c.parentValue || null, // level2
+    };
+  }).filter((s) => s.id); // skip any non-store choice with no leading number
   const areaToRegion = new Map((f.level2?.choices || []).map((c) => [c.value, c.parentValue || null])); // level2 -> level3
   const known = new Map(db.prepare("SELECT restaurant_id, store_number FROM restaurant WHERE is_demo = 0 AND store_number IS NOT NULL").all()
     .map((r) => [String(r.store_number).trim().replace(/^0+/, ""), r.restaurant_id]));
