@@ -64,7 +64,7 @@ DMGSRC="$BUILD/dmg"; mkdir -p "$DMGSRC"
 mv "$APP" "$DMGSRC/"; ln -s /Applications "$DMGSRC/Applications"
 rm -f "$DMG"
 hdiutil create -volname "$APP_NAME" -srcfolder "$DMGSRC" -fs HFS+ -format UDZO -imagekey zlib-level=9 -ov "$DMG" >/dev/null
-mv "$DMGSRC/$APP_NAME.app" "$BUILD/"; rm -rf "$DMGSRC"
+rm -rf "$BUILD" # only the disk image is kept: a loose copy of the app confuses Launch Services and Spotlight
 if [ "$IDENTITY" != "-" ]; then
   codesign --force --sign "$IDENTITY" "$DMG"
   if [ -n "${MAC_NOTARY_PROFILE:-}" ]; then

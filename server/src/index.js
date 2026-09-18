@@ -1,4 +1,5 @@
 import express from "express";
+import http from "http";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
@@ -439,6 +440,10 @@ app.use((err, _req, res, _next) => {
 const PORT = process.env.PORT || 4000;
 // OPS_HOST=127.0.0.1 keeps the dashboard to this computer, which is how the installed apps
 // start (no firewall prompt). Unset, it is reachable from the network, as a hosted copy must be.
+// Safari tries "localhost" over IPv6 first, so the local-only mode listens on ::1 as well.
+if (process.env.OPS_HOST === "127.0.0.1") {
+  http.createServer(app).on("error", () => {}).listen(PORT, "::1");
+}
 app.listen(PORT, process.env.OPS_HOST || undefined, () => {
   console.log(`IHOP Operations Dashboard running at http://localhost:${PORT}`);
   if (db.prepare("SELECT COUNT(*) n FROM app_user").get().n === 0) console.log("No accounts yet. Open the address above in a browser to create the administrator account.");
