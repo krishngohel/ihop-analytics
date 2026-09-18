@@ -36,30 +36,43 @@ export function portalConfig() {
   };
 }
 
-/** Signs in and returns the access token. Throws a clear message for the two common failures. */
+/** Signs in and returns the access token. Throws a clear, specific message on failure. */
 async function login(cfg) {
+  const username = String(cfg.username || "").trim(); // a pasted email often carries a trailing space
+  const password = String(cfg.password || "");
+  const hdrs = { "Content-Type": "application/json", Accept: "application/json", "User-Agent": UA, Origin: ACCOUNT_URL, Referer: `${ACCOUNT_URL}/` };
+
+  // Accounts that sign in through single sign-on can't use the password endpoint at all.
+  try {
+    const sso = await fetch(`${ACCOUNT_URL}/api/sso-scheme`, { method: "POST", headers: hdrs, body: JSON.stringify({ username }), signal: AbortSignal.timeout(20000) });
+    if (sso.ok) {
+      const s = await sso.json().catch(() => ({}));
+      if (s.scheme || s.authUrl) throw new Error("This Rosnet account signs in through single sign-on (SSO / Microsoft), which can't be automated. Use the reports mailbox or an API key instead.");
+    }
+  } catch (e) { if (/single sign-on/.test(e.message)) throw e; /* a network hiccup on the SSO check shouldn't block the login attempt */ }
+
   let res;
   try {
-    res = await fetch(`${ACCOUNT_URL}/api/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json", "User-Agent": UA },
-      body: JSON.stringify({ username: cfg.username, password: cfg.password }),
-      signal: AbortSignal.timeout(30000),
-    });
+    res = await fetch(`${ACCOUNT_URL}/api/login`, { method: "POST", headers: hdrs, body: JSON.stringify({ username, password }), signal: AbortSignal.timeout(30000) });
   } catch (e) {
     throw new Error(`Couldn't reach the Rosnet portal sign-in: ${e.message}`);
   }
-  if (res.status === 401 || res.status === 403) throw new Error("Rosnet rejected the portal username or password.");
-  if (!res.ok) throw new Error(`Rosnet portal sign-in failed (${res.status}).`);
-  const body = await res.json().catch(() => ({}));
+  const text = await res.text();
+  let body = {};
+  try { body = JSON.parse(text); } catch { /* non-JSON (a Cloudflare page, say) */ }
   const token = body.access_token || body.accessToken;
-  if (!token) {
-    // A body with no token but an OK status usually means an MFA / password-reset interstitial.
-    throw new Error(body.message && /mfa|verif|expir/i.test(body.message)
-      ? "This portal login needs a code or a password reset, so it can't be used unattended. Use the emailed-report route, or an API key."
-      : "Rosnet signed in but returned no access token.");
+  if (token) return token;
+
+  if (body.message && /mfa|verif|\bcode\b|two.?factor|otp/i.test(body.message)) {
+    throw new Error("This login needs a verification code (MFA), so it can't run unattended. Use the reports mailbox or an API key instead.");
   }
-  return token;
+  if (res.status === 401 || res.status === 403) {
+    // Surface Rosnet's own message when it gives one; otherwise a specific, actionable hint.
+    throw new Error(body.message ? `Rosnet rejected the sign-in: ${body.message}`
+      : "Rosnet rejected the sign-in. Check the username and password are exactly what works on portal.rosnet.com — watch for a trailing space, caps lock, or a saved/autofilled password that differs.");
+  }
+  if (res.ok) throw new Error("Rosnet signed in but returned no access token — this login may use SSO or need a code. Use the reports mailbox or an API key.");
+  throw new Error(`Rosnet portal sign-in failed (${res.status}).`);
 }
 
 // One gateway data call. The portal reads auth from an access_token cookie shared across

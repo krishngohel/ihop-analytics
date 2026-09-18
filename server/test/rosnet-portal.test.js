@@ -32,6 +32,7 @@ const server = http.createServer((req, res) => {
   let body = "";
   req.on("data", (c) => (body += c));
   req.on("end", () => {
+    if (url.pathname === "/api/sso-scheme") return json({ client: null, scheme: null, authUrl: null });
     if (url.pathname === "/api/login") {
       const creds = JSON.parse(body || "{}");
       seen.loginCreds.push(creds);
@@ -117,5 +118,5 @@ test("a bad portal password gives a clear error and never appears in the message
   const { saveConnectionValues } = await import("../src/connections.js");
   const { testPortal } = await import("../src/sources/rosnet-portal.js");
   saveConnectionValues({ rosnet_portal_password: "wrong-pass" });
-  await assert.rejects(() => testPortal(), (e) => /rejected the portal username or password/i.test(e.message) && !e.message.includes("wrong-pass"));
+  await assert.rejects(() => testPortal(), (e) => /rejected the sign-in/i.test(e.message) && !e.message.includes("wrong-pass"));
 });
