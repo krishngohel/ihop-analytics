@@ -1,36 +1,60 @@
 # Installing the IHOP Operations Dashboard
 
-Works on macOS and Windows. About five minutes.
+One installer, then a short setup screen. Nothing else to install, no Terminal, no settings files.
 
-## 1. Install Node.js (one time)
+## 1. Install
 
-Download the **LTS** installer from https://nodejs.org and run it. Version 22.9 or newer is required.
+**Mac.** Open `IHOP-Operations-<version>.dmg` and drag **IHOP Operations** onto **Applications**. Open it from Applications.
 
-## 2. Unzip and start
+**Windows.** Run `IHOP-Operations-Setup-<version>.exe` and choose Install. It installs for your account only, so it does not ask for an administrator. Leave "Start when I sign in" ticked.
 
-Unzip `ihop-operations-dashboard.zip` somewhere permanent (Documents is fine, not Downloads).
+Your browser opens the dashboard at http://localhost:4000. There is no window to keep open: look for the small pancake-stack icon in the menu bar (Mac) or near the clock (Windows). Its menu has **Open Dashboard**, **Show Reports Folder**, **Start When I Log In**, **Let Others on This Network Open It** and **Quit**.
 
-- **Mac:** double-click `Start Dashboard.command`.
-  The first time, macOS may say it can't be opened because it is from an unidentified developer. **Right-click it, choose Open, then Open again.** You only do that once.
-  If it says you don't have permission, open Terminal and run: `chmod +x ~/Documents/ihop-operations-dashboard/"Start Dashboard.command"` (adjust the path to where you unzipped it).
-- **Windows:** double-click `Start Dashboard.bat`. If Windows shows a blue "protected your PC" box, choose More info, then Run anyway.
+> **First-open warning.** Until the app is signed with a paid Apple / Microsoft publisher certificate, each system shows a one-time warning.
+> Mac: "IHOP Operations can't be opened" → open **System Settings > Privacy & Security**, scroll down, choose **Open Anyway**.
+> Windows: blue "Windows protected your PC" → **More info** → **Run anyway**.
+> See "For the person who builds the installers" below to remove these warnings for good.
 
-A window opens and stays open while the dashboard runs. Your browser opens at http://localhost:4000. To stop the dashboard, close that window.
+## 2. Create your account
 
-## 3. Create your account
+The first screen asks you to create the administrator account (name, email, a password of 10+ characters). That person sees every restaurant and adds everyone else later under **Data and refresh > People and access**.
 
-The first screen asks you to create the administrator account (name, email, a password of 10+ characters). That person sees every restaurant and adds everyone else under **Data and refresh > People and access**.
+## 3. Get connected
 
-## 4. Load your data
+You land on **Get connected**, a four-line checklist that ticks itself off as data arrives:
 
-Go to **Data and refresh > Reports and layouts** and import one copy of each Rosnet report and your Merchant Centric STARS export. Check the column matches, name the layout, import. Then set up automatic delivery so nobody has to do that again: see `docs/connecting-rosnet-and-stars.md`.
+1. **Connect Rosnet.** Set up the **Reports mailbox**: a new Gmail account made just for reports (2-Step Verification on, then an app password from myaccount.google.com/apppasswords). Enter the address and app password, press **Test connection**, and save. Then, in Rosnet, schedule the daily reports (push reports) to email that address, as Excel or CSV. When the first one arrives, press **Test connection** again and click the sender to trust it. If Rosnet ever issues an API key, there is a box for that too, but it is optional.
+2. **Put restaurants in their regions and areas.** Import a store list once (Store Number, Restaurant, Region, Area, Area Manager, City, State) under **Reports and layouts**.
+3. **Load sales and labor.** Export the last few weeks from Rosnet and import them. The dashboard guesses the columns; confirm them once and name the layout. Every later copy that arrives by email or folder loads by itself. A report that arrives in a layout the dashboard hasn't seen is kept and shown with a **Fix layout** button, so nobody has to export it again.
+4. **Forecast sales and allowable hours.** Include the Rosnet report that has them in the scheduled emails, and confirm its layout once.
 
-The simplest automatic route: any report saved into the `server/import` folder inside the dashboard folder is picked up on the next refresh.
+Any report saved into **Documents > IHOP Operations Reports** is also imported on the next refresh.
+
+Details, and ready-to-send emails to Rosnet and Merchant Centric: `docs/connecting-rosnet-and-stars.md`.
 
 ## Good to know
 
-- **The dashboard only updates while it is running.** On a laptop that is closed or off at 5:30am, the morning refresh runs the next time it starts. For a team to rely on it every morning, run it on a computer that stays on, or host it online (see README, "Hosting it online").
-- **Other people on the same office network** can open it at `http://<this computer's name or IP>:4000` while it is running. The Mac or Windows firewall may ask once to allow incoming connections.
-- **Your data lives in one file:** `server/ops.db`. Back it up by copying that file while the dashboard is stopped. To move to another computer, copy the whole folder.
-- **Settings** (mailbox for emailed reports, folder, push token) go in `server/.env`. Restart the dashboard after changing it.
-- **Updating to a new version:** unzip the new version, then copy your `server/ops.db` and `server/.env` from the old folder into the new one.
+- **The dashboard updates while it is running.** With "start when I sign in" on, that is whenever the computer is on; it also keeps the computer from sleeping. For a team to rely on it every morning, use a computer that stays on, or host it online (README, "Hosting it online").
+- **Sharing with the office.** By default only this computer can open the dashboard. Choose **Let Others on This Network Open It** in the icon's menu, and colleagues can use `http://<this computer's name>:4000`. The system firewall may ask once to allow it.
+- **Your data is kept apart from the app.** Mac: `~/Library/Application Support/IHOP Operations`. Windows: `%LOCALAPPDATA%\IHOP Operations`. Back up that folder (it holds `ops.db` and the `.secret-key` that unlocks the saved passwords; keep them together). To move to another computer, install there and copy the folder across.
+- **Updating.** Install the new version over the old one. Data and settings are untouched.
+- **Uninstalling.** Mac: quit from the menu bar icon and drag the app to the Trash. Windows: Settings > Apps; it asks whether to keep or delete your data.
+- **Passwords.** The Rosnet API key and the mailbox password are stored encrypted and never shown again. Nobody's Rosnet website password is ever used or stored.
+
+## For the person who builds the installers
+
+```bash
+packaging/build-mac.sh                                           # on a Mac: release/IHOP-Operations-<version>.dmg
+powershell -ExecutionPolicy Bypass -File packaging\build-windows.ps1   # on Windows with Inno Setup 6: release\IHOP-Operations-Setup-<version>.exe
+```
+
+Both bundle their own copy of Node (checksum-verified from nodejs.org), so the client installs nothing else.
+
+**Removing the first-open warnings** takes publisher certificates, which only the account holder can buy:
+
+- **Mac:** an Apple Developer Program membership. Create a *Developer ID Application* certificate, store notary credentials with `xcrun notarytool store-credentials`, then build with `MAC_SIGN_IDENTITY="Developer ID Application: Name (TEAMID)" MAC_NOTARY_PROFILE=<profile> packaging/build-mac.sh`. The script signs, notarizes and staples.
+- **Windows:** a code-signing certificate (or Azure Trusted Signing); sign the setup program and `IHOP Operations.exe` with `signtool`.
+
+## Without an installer
+
+The plain zip still works anywhere Node 22.9+ is installed: unzip, then double-click `Start Dashboard.command` (Mac) or `Start Dashboard.bat` (Windows). Setup is the same from step 2.

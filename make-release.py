@@ -17,7 +17,7 @@ OUT = os.path.join(ROOT, "release", f"{NAME}.zip")
 INCLUDE = ["server/src", "server/node_modules", "server/package.json", "server/package-lock.json", "server/.env.example",
            "client/dist", "docs", "README.md", "Dockerfile", "Start Dashboard.bat", "Start Dashboard.command", "INSTALL.md"]
 SKIP_DIRS = {".git", "legacy", "import", "release", "__pycache__", ".cache"}
-SKIP_FILES = {".env", ".demo-credentials.txt", ".DS_Store"}
+SKIP_FILES = {".env", ".secret-key", ".demo-credentials.txt", ".DS_Store"}
 SKIP_SUFFIXES = (".db", ".db-wal", ".db-shm", ".log")
 EXECUTABLE = {"Start Dashboard.command"}
 
