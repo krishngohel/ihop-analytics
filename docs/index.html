@@ -120,11 +120,13 @@
         <p>Open the downloaded <code>IHOP-Operations.dmg</code> and drag <b>IHOP Operations</b> onto the <b>Applications</b> folder. Open it from Applications (or Launchpad).</p>
       </li>
       <li>
-        <h3>Allow it to open — one time</h3>
-        <p>Because the app isn't from the Mac App Store, macOS asks the first time. Open <b>System&nbsp;Settings → Privacy&nbsp;&amp;&nbsp;Security</b>, scroll down, and click <b>Open Anyway</b>. (Or right-click the app and choose <b>Open</b>.)</p>
+        <h3>Allow it to open</h3>
+        <p>Because the app isn't from the Mac App Store, macOS asks before opening it. Open <b>System&nbsp;Settings → Privacy&nbsp;&amp;&nbsp;Security</b>, scroll down, and click <b>Open Anyway</b>. (Or right-click the app and choose <b>Open</b>.)</p>
+        <p style="margin-top:10px"><b>To stop macOS asking every time you open it</b>, run this one command once. Open <b>Terminal</b> (press&nbsp;⌘Space, type <i>Terminal</i>, Enter), paste the line below, and press&nbsp;Enter:</p>
+        <p><code>xattr -dr com.apple.quarantine "/Applications/IHOP Operations.app"</code></p>
         <div class="callout">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4 2.5 20h19L12 4z"/><path d="M12 10v4.5M12 17.5v.01"/></svg>
-          <span>You only do this once. After that it opens like any other app.</span>
+          <span>That command just clears the "downloaded from the internet" flag on this one app, so it opens straight away from then on. You run it once, after installing.</span>
         </div>
       </li>
       <li>
