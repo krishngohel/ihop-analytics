@@ -122,10 +122,10 @@ export function PerformanceStrip({ t, live = false, extra = null }) {
       <Stat label="Labor variance" value={<span className={laborTone(t.labor_variance)}>{fmtHoursSigned(t.labor_variance)}</span>} lines={[
         <span key="p"><Delta value={t.labor_variance_pct} kind="labor" /> <span className="neutral">vs. allowable</span></span>,
       ]} />
-      {!live && t.survey_count > 0 && (
+      {!live && (
         <Stat label="Guest rating" value={fmtRating(t.average_rating)} lines={[
           <span key="s" className="neutral">{fmtNum(t.survey_count)} surveys</span>,
-          t.google_review_count ? <span key="g" className="neutral">Google {fmtRating(t.google_rating)} · {fmtNum(t.google_review_count)} reviews</span> : null,
+          <span key="g" className="neutral">Google {fmtRating(t.google_rating)} · {fmtNum(t.google_review_count)} reviews</span>,
         ]} />
       )}
       {extra}

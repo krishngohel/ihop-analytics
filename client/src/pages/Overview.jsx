@@ -34,10 +34,10 @@ function WeatherSummary({ w }) {
   const line = (label, s) => (
     <div className="wx-summary-line">
       <strong>{label}</strong>
-      <span>{fmtNum(s.rain)} of {fmtNum(s.restaurants)} restaurants had rain{s.thunderstorms ? `, ${fmtNum(s.thunderstorms)} with thunderstorms` : ""} · average high {fmtTemp(s.avg_high)}</span>
+      <span>{s.restaurants ? `${fmtNum(s.rain)} of ${fmtNum(s.restaurants)} restaurants had rain${s.thunderstorms ? `, ${fmtNum(s.thunderstorms)} with thunderstorms` : ""} · average high ${fmtTemp(s.avg_high)}` : "No weather on file"}</span>
     </div>
   );
-  const wetAreas = w.current.byArea.filter((a) => a.rain > 0);
+  const wetAreas = (w.current.byArea || []).filter((a) => a.rain > 0);
   return (
     <div className="card">
       <h3>Weather across markets</h3>
@@ -62,12 +62,6 @@ export default function Overview() {
   const live = single && range.to === o.today?.date;
   const scope = user.role === "executive" ? "The company" : user.scope_name;
 
-  // Only show what there's data for: guest ratings and weather come from other feeds that may
-  // not be connected, and empty "-" columns are exactly the noise that makes this hard to scan.
-  const hasGuest = [o.selected, o.yesterday, ...(o.breakdown || [])].some((x) => x && x.survey_count > 0);
-  const hasWeather = o.weather?.current?.avg_high !== null && o.weather?.current?.avg_high !== undefined;
-  const hasDayparts = o.dayparts?.some((d) => d.actual_sales !== null && d.actual_sales !== undefined);
-
   return (
     <div style={{ opacity: loading ? 0.6 : 1 }}>
       <RangeBar />
@@ -88,9 +82,7 @@ export default function Overview() {
           <ScoreTile to="/regions" label="Labor vs. allowable" value={fmtHours(t.actual_labor_hours)}
             delta={t.labor_variance_pct} deltaKind="labor" deltaLabel={t.labor_variance_pct > 0 ? "over" : "under"}
             sub={`Allowable ${fmtHours(t.allowable_labor_hours)}${t.labor_cost_pct ? ` · ${t.labor_cost_pct}% of sales` : ""}`} />
-          {hasGuest && (
-            <ScoreTile to="/hotspots" label="Guest rating" value={fmtRating(t.average_rating)} sub={`${fmtNum(t.survey_count)} surveys`} />
-          )}
+          <ScoreTile to="/hotspots" label="Guest rating" value={fmtRating(t.average_rating)} sub={`${fmtNum(t.survey_count)} surveys`} />
           <ScoreTile accent to="/hotspots" label="Need attention" value={o.hotspots.count}
             sub={o.hotspots.critical ? `${o.hotspots.critical} critical · of ${o.hotspots.restaurants}` : `of ${o.hotspots.restaurants} restaurants`} />
         </div>
@@ -133,32 +125,28 @@ export default function Overview() {
         <VarianceBars data={o.breakdown} dataKey="sales_variance_pct" onSelect={(d) => navigate(childPath(d))} />
         <details className="more-table">
           <summary>Show the numbers for every {childLabel.toLowerCase()}</summary>
-          <PerfTable rows={o.breakdown} linkFor={childPath} nameLabel={childLabel} hideGuest={!hasGuest}
+          <PerfTable rows={o.breakdown} linkFor={childPath} nameLabel={childLabel}
             subtitleFor={o.breakdownLevel === "area" ? (r) => r.area_manager : null} />
         </details>
       </div>
 
-      {(hasDayparts || hasWeather) && (
-        <div className={hasDayparts && hasWeather ? "grid" : ""}>
-          {hasDayparts && (
-            <div className="card">
-              <h3>Dayparts</h3>
-              <table className="ledger small">
-                <thead><tr><th>Daypart</th><th className="num">Sales</th><th className="num">vs. forecast</th><th className="num">vs. last year</th></tr></thead>
-                <tbody>
-                  {o.dayparts.map((d) => (
-                    <tr key={d.daypart} className={d.daypart === "breakfast" ? "emphasis-row" : ""}>
-                      <td>{d.label}</td><td className="num money">{fmt$(d.actual_sales)}</td>
-                      <td className="num"><Delta value={d.sales_variance_pct} /></td><td className="num"><Delta value={d.prior_year_variance_pct} /></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-          {hasWeather && <WeatherSummary w={o.weather} />}
+      <div className="grid">
+        <div className="card">
+          <h3>Dayparts</h3>
+          <table className="ledger small">
+            <thead><tr><th>Daypart</th><th className="num">Sales</th><th className="num">vs. forecast</th><th className="num">vs. last year</th></tr></thead>
+            <tbody>
+              {o.dayparts.map((d) => (
+                <tr key={d.daypart} className={d.daypart === "breakfast" ? "emphasis-row" : ""}>
+                  <td>{d.label}</td><td className="num money">{fmt$(d.actual_sales)}</td>
+                  <td className="num"><Delta value={d.sales_variance_pct} /></td><td className="num"><Delta value={d.prior_year_variance_pct} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      )}
+        <WeatherSummary w={o.weather} />
+      </div>
     </div>
   );
 }
