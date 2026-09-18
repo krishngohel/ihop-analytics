@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "../appContext.jsx";
 import { getForecastForm, getForecastRollup, saveForecast } from "../api.js";
-import { Delta, Loading } from "../components/Bits.jsx";
+import { Delta, Loading, ToneBadge } from "../components/Bits.jsx";
 import { fmt$, fmtNum, fmtPct, prettyDay, prettyTime, addDays, laborTone } from "../format.js";
 
 const STATUS = { submitted: { label: "Submitted", tone: "ok" }, incomplete: { label: "Incomplete", tone: "watch" }, missing: { label: "Not started", tone: "attention" } };
@@ -10,7 +10,7 @@ const pctOf = (a, b) => (a !== null && b ? Math.round(((a - b) / b) * 1000) / 10
 
 function StatusBadge({ status }) {
   const s = STATUS[status];
-  return <span className={`status-badge tone-${s.tone}`}>{s.label}</span>;
+  return <ToneBadge tone={s.tone}>{s.label}</ToneBadge>;
 }
 
 // One restaurant's form. Calculated fields update as the manager types; the server

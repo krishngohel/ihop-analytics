@@ -46,7 +46,6 @@ export default function Hotspots() {
     <div style={{ opacity: loading ? 0.6 : 1 }}>
       <RangeBar>{filters}</RangeBar>
       <div className="page-title-row">
-        <h2>Hotspots</h2>
         <span className="muted">{h.hotspots.length} of {h.restaurants} restaurants · last-year comparison uses {prettyDay(h.lastYearFrom, { weekday: "short", month: "short", day: "numeric", year: "numeric" })}{single ? "" : ` to ${prettyDay(h.lastYearTo)}`}</span>
       </div>
 

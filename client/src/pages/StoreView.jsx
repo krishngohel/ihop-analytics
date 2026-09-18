@@ -4,26 +4,10 @@ import { useApp, useData } from "../appContext.jsx";
 import { getStore } from "../api.js";
 import RangeBar from "../components/RangeBar.jsx";
 import { SalesTrend, LaborTrend } from "../components/Charts.jsx";
-import { PerformanceStrip, Crumbs, Loading, Delta, SeverityBadge, WeatherLine } from "../components/Bits.jsx";
+import { Snapshot, PerformanceStrip, Crumbs, Loading, Delta, SeverityBadge, WeatherLine } from "../components/Bits.jsx";
 import { fmt$, fmtHours, fmtNum, fmtRating, fmtTemp, prettyDay, laborTone, fmtHoursSigned } from "../format.js";
 
 const VIEWS = [{ key: "daily", label: "Daily" }, { key: "weekly", label: "Weekly" }, { key: "periods", label: "By period" }];
-
-function Snapshot({ title, caption, t, live }) {
-  if (!t || t.actual_sales === undefined || t.actual_sales === null) return <div className="card snapshot"><h3>{title}</h3><p className="muted">Nothing on file yet.</p></div>;
-  return (
-    <div className="card snapshot">
-      <h3>{title}</h3>
-      <div className="muted">{caption}</div>
-      <div className="snapshot-value money">{fmt$(t.actual_sales)}</div>
-      <dl>
-        <div><dt>{live ? "vs. forecast so far" : "vs. forecast"}</dt><dd><Delta value={t.sales_variance_pct} /></dd></div>
-        {!live && <div><dt>vs. last year</dt><dd><Delta value={t.prior_year_variance_pct} /></dd></div>}
-        <div><dt>Labor vs. allowable</dt><dd><Delta value={t.labor_variance_pct} kind="labor" /></dd></div>
-      </dl>
-    </div>
-  );
-}
 
 function wx(w) {
   if (!w) return "-";
@@ -55,18 +39,18 @@ export default function StoreView() {
           <p className="status-line"><strong>{prettyDay(s.latestStatus.date)}:</strong> {s.latestStatus.flags.join(" · ")}{s.latestStatus.weather_note ? ` ${s.latestStatus.weather_note}` : ""}</p>
         )}
         <PerformanceStrip t={s.selected} live={single && range.to === s.today?.date} />
-        {s.areaAverage && <p className="muted" style={{ margin: "0 0 12px" }}>{r.area_name} area for the same dates: sales <Delta value={s.areaAverage.sales_variance_pct} /> vs. forecast, labor <Delta value={s.areaAverage.labor_variance_pct} kind="labor" /> vs. allowable, guest rating {fmtRating(s.areaAverage.average_rating)}.</p>}
+        {s.areaAverage && <p className="muted" style={{ margin: "12px 0 0" }}>{r.area_name} area for the same dates: sales <Delta value={s.areaAverage.sales_variance_pct} /> vs. forecast, labor <Delta value={s.areaAverage.labor_variance_pct} kind="labor" /> vs. allowable, guest rating {fmtRating(s.areaAverage.average_rating)}.</p>}
       </div>
 
       <div className="grid three">
-        <Snapshot title="Today, live" caption={s.today ? `${prettyDay(s.today.date)} · sales so far` : ""} t={s.today} live />
+        <Snapshot title="Today" caption={s.today ? `${prettyDay(s.today.date)} · sales so far` : ""} t={s.today} live />
         <Snapshot title="Yesterday, final" caption={prettyDay(s.yesterday.date)} t={s.yesterday} />
         <Snapshot title={`Period ${s.periodToDate.number} to date`} caption={`${prettyDay(s.periodToDate.from)} to ${prettyDay(s.periodToDate.through)}`} t={s.periodToDate} />
       </div>
 
       <div className="card">
         <h3>Recent performance anomalies</h3>
-        <p className="muted" style={{ marginTop: -6 }}>Days in the last 28 that crossed a threshold: sales 10% under forecast, 12% under last year, labor 8% over allowable, a possible opening-time issue, or sales 12% over forecast.</p>
+        <p className="muted card-sub">Days in the last 28 that crossed a threshold: sales 10% under forecast, 12% under last year, labor 8% over allowable, a possible opening-time issue, or sales 12% over forecast.</p>
         {s.anomalies.length === 0 ? <p className="muted">No anomalies in the last 28 days.</p> : (
           <ul className="anomaly-list">
             {s.anomalies.map((a) => (

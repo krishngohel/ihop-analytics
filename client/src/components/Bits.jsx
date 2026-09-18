@@ -1,22 +1,46 @@
 import { Link } from "react-router-dom";
+import { AlertIcon, EyeIcon, CheckIcon, StarIcon } from "./Icons.jsx";
 import { fmt$, fmt$signed, fmtPct, fmtHours, fmtHoursSigned, fmtNum, fmtRating, fmtTemp, salesTone, laborTone } from "../format.js";
 
 export const SEVERITY = {
-  critical: { label: "Critical", tone: "attention" },
-  needs_review: { label: "Needs review", tone: "watch" },
-  watch: { label: "Watch", tone: "neutral" },
-  positive_outlier: { label: "Positive outlier", tone: "ok" },
+  critical: { label: "Critical", tone: "attention", icon: AlertIcon },
+  needs_review: { label: "Needs review", tone: "watch", icon: EyeIcon },
+  watch: { label: "Watch", tone: "neutral", icon: EyeIcon },
+  positive_outlier: { label: "Positive outlier", tone: "ok", icon: StarIcon },
 };
 
 export function SeverityBadge({ severity }) {
   const s = SEVERITY[severity];
   if (!s) return null;
-  return <span className={`status-badge tone-${s.tone}`}>{s.label}</span>;
+  return <span className={`status-badge tone-${s.tone}`}><s.icon size={12} />{s.label}</span>;
+}
+
+/** A status pill with the icon that matches its tone, so the state never rides on color alone. */
+const TONE_ICON = { ok: CheckIcon, watch: EyeIcon, attention: AlertIcon };
+export function ToneBadge({ tone, children }) {
+  const I = TONE_ICON[tone];
+  return <span className={`status-badge tone-${tone}`}>{I && <I size={12} />}{children}</span>;
 }
 
 export function Delta({ value, kind = "sales", suffix = "" }) {
   const tone = kind === "labor" ? laborTone(value) : salesTone(value);
   return <span className={`money ${tone}`}>{fmtPct(value)}{suffix}</span>;
+}
+
+/**
+ * A variance percentage with a small bar either side of a zero line, scaled to `max`
+ * (the largest variance in the table) so rows can be compared at a glance.
+ */
+export function VarCell({ value, max, kind = "sales" }) {
+  if (value === null || value === undefined) return <span className="neutral">-</span>;
+  const good = kind === "labor" ? value <= 0 : value >= 0;
+  const share = max ? Math.min(1, Math.abs(value) / max) * 50 : 0;
+  return (
+    <span className="varcell">
+      <span className="varbar" aria-hidden="true"><i className={good ? "good" : "bad"} style={value >= 0 ? { left: "50%", width: `${share}%` } : { right: "50%", width: `${share}%` }} /></span>
+      <Delta value={value} kind={kind} />
+    </span>
+  );
 }
 
 export function Crumbs({ items }) {
@@ -79,6 +103,35 @@ export function PerformanceStrip({ t, live = false, extra = null }) {
 }
 
 export { Stat };
+
+/**
+ * Today / yesterday / period card. The live card adds a meter of sales so far against the
+ * full-day forecast. `detailed` adds the dollar and hour figures behind each percentage.
+ */
+export function Snapshot({ title, caption, t, live = false, detailed = false }) {
+  const heading = <h3>{title}{live && <span className="live-pill"><i />Live</span>}</h3>;
+  if (!t || t.actual_sales === undefined || t.actual_sales === null) return <div className="card snapshot">{heading}<p className="muted">Nothing on file yet.</p></div>;
+  const progress = live && t.forecast_sales ? Math.min(100, Math.round((t.actual_sales / t.forecast_sales) * 100)) : null;
+  return (
+    <div className="card snapshot">
+      {heading}
+      <div className="muted">{caption}</div>
+      <div className="snapshot-value">{fmt$(t.actual_sales)}</div>
+      {progress !== null && (
+        <div className="meter">
+          <div className="meter-track" role="img" aria-label={`${progress}% of the full-day forecast`}><div className="meter-fill" style={{ width: `${progress}%` }} /></div>
+          <div className="meter-caption"><span>{progress}% of full-day forecast</span><span className="money">{fmt$(t.forecast_sales)}</span></div>
+        </div>
+      )}
+      <dl>
+        <div><dt>{live ? "vs. forecast so far" : "vs. forecast"}</dt><dd><Delta value={t.sales_variance_pct} />{detailed && t.forecast_basis !== null && t.forecast_basis !== undefined && <> <span className="neutral money">({fmt$(t.forecast_basis)})</span></>}</dd></div>
+        {!live && <div><dt>vs. last year</dt><dd><Delta value={t.prior_year_variance_pct} /></dd></div>}
+        <div><dt>Labor vs. allowable</dt><dd><Delta value={t.labor_variance_pct} kind="labor" />{detailed && t.labor_variance !== null && t.labor_variance !== undefined && <> <span className={`money ${laborTone(t.labor_variance)}`}>({fmtHoursSigned(t.labor_variance)})</span></>}</dd></div>
+        {detailed && !live && <div><dt>Guest rating</dt><dd className="money">{fmtRating(t.average_rating)} <span className="neutral">({fmtNum(t.survey_count)} surveys)</span></dd></div>}
+      </dl>
+    </div>
+  );
+}
 
 export function WeatherLine({ label, w, single = true }) {
   if (!w) return <div className="wx-line"><span className="wx-label">{label}</span><span className="neutral">No weather on file</span></div>;

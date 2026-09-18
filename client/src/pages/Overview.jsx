@@ -5,33 +5,20 @@ import RangeBar from "../components/RangeBar.jsx";
 import PerfTable from "../components/PerfTable.jsx";
 import HotspotCard from "../components/HotspotCard.jsx";
 import { SalesTrend, VarianceBars } from "../components/Charts.jsx";
-import { PerformanceStrip, Delta, Loading } from "../components/Bits.jsx";
+import { Snapshot, PerformanceStrip, Delta, Loading } from "../components/Bits.jsx";
 import { fmt$, fmtPct, fmtNum, fmtRating, fmtHoursSigned, fmtTemp, prettyDay, laborTone } from "../format.js";
 
 function verdict(o, scopeName) {
   const t = o.selected;
-  if (!t) return "No results on file for this selection.";
-  const sales = t.sales_variance_pct === null ? "" : `Sales are ${fmt$(t.actual_sales)}, ${t.sales_variance_pct >= 0 ? "ahead of" : "behind"} forecast by ${fmtPct(Math.abs(t.sales_variance_pct)).replace("+", "")}`;
-  const labor = t.labor_variance_pct === null ? "" : ` and labor is ${fmtPct(Math.abs(t.labor_variance_pct)).replace("+", "")} ${t.labor_variance_pct > 0 ? "over" : "under"} allowable hours`;
+  if (!t || t.actual_sales === null || t.actual_sales === undefined) return "No results on file for this selection.";
+  const plain = (n) => fmtPct(Math.abs(n)).replace("+", "");
+  // Forecast first. Without one on file (the Rosnet API doesn't carry it) fall back to last year.
+  const against = t.sales_variance_pct !== null && t.sales_variance_pct !== undefined ? `, ${t.sales_variance_pct >= 0 ? "ahead of" : "behind"} forecast by ${plain(t.sales_variance_pct)}`
+    : t.prior_year_variance_pct !== null && t.prior_year_variance_pct !== undefined ? `, ${t.prior_year_variance_pct >= 0 ? "up" : "down"} ${plain(t.prior_year_variance_pct)} on last year` : "";
+  const labor = t.labor_variance_pct === null || t.labor_variance_pct === undefined ? "" : ` and labor is ${plain(t.labor_variance_pct)} ${t.labor_variance_pct > 0 ? "over" : "under"} allowable hours`;
   const hs = ` ${o.hotspots.count} of ${o.hotspots.restaurants} restaurants need attention${o.hotspots.critical ? `, ${o.hotspots.critical} of them critical` : ""}.`;
-  return `${scopeName}: ${sales}${labor}.${hs}`;
-}
-
-function Snapshot({ title, caption, t, live }) {
-  if (!t || t.actual_sales === undefined) return <div className="card snapshot"><h3>{title}</h3><p className="muted">Nothing on file yet.</p></div>;
-  return (
-    <div className="card snapshot">
-      <h3>{title}</h3>
-      <div className="muted">{caption}</div>
-      <div className="snapshot-value money">{fmt$(t.actual_sales)}</div>
-      <dl>
-        <div><dt>{live ? "vs. forecast so far" : "vs. forecast"}</dt><dd><Delta value={t.sales_variance_pct} /> <span className="neutral money">({fmt$(t.forecast_basis)})</span></dd></div>
-        {!live && <div><dt>vs. last year</dt><dd><Delta value={t.prior_year_variance_pct} /></dd></div>}
-        <div><dt>Labor vs. allowable</dt><dd><Delta value={t.labor_variance_pct} kind="labor" /> <span className={`money ${laborTone(t.labor_variance)}`}>({fmtHoursSigned(t.labor_variance)})</span></dd></div>
-        {!live && <div><dt>Guest rating</dt><dd className="money">{fmtRating(t.average_rating)} <span className="neutral">({fmtNum(t.survey_count)} surveys)</span></dd></div>}
-      </dl>
-    </div>
-  );
+  const missing = t.forecast_sales === null || t.forecast_sales === undefined ? " No forecast is on file for these dates yet." : "";
+  return `${scopeName}: sales are ${fmt$(t.actual_sales)}${against}${labor}.${hs}${missing}`;
 }
 
 function WeatherSummary({ w }) {
@@ -72,9 +59,9 @@ export default function Overview() {
       </div>
 
       <div className="grid three">
-        <Snapshot title="Today, live" caption={o.today ? `${prettyDay(o.today.date)} · sales so far` : ""} t={o.today} live />
-        <Snapshot title="Yesterday, final" caption={prettyDay(o.yesterday.date)} t={o.yesterday} />
-        <Snapshot title={`Period ${o.periodToDate.number} to date`} caption={`${prettyDay(o.periodToDate.from)} to ${prettyDay(o.periodToDate.through)}`} t={o.periodToDate} />
+        <Snapshot detailed title="Today" caption={o.today ? `${prettyDay(o.today.date)} · sales so far` : ""} t={o.today} live />
+        <Snapshot detailed title="Yesterday, final" caption={prettyDay(o.yesterday.date)} t={o.yesterday} />
+        <Snapshot detailed title={`Period ${o.periodToDate.number} to date`} caption={`${prettyDay(o.periodToDate.from)} to ${prettyDay(o.periodToDate.through)}`} t={o.periodToDate} />
       </div>
 
       <div className="card">
@@ -82,7 +69,7 @@ export default function Overview() {
           <h3>Where to look first: {o.hotspots.count} hotspots</h3>
           <Link className="btn secondary small" to="/hotspots">Open all hotspots</Link>
         </div>
-        <p className="muted" style={{ marginTop: -6 }}>The bottom {Math.round(o.hotspots.share * 100)}% of {o.hotspots.restaurants} restaurants on sales and labor exceptions for this selection.</p>
+        <p className="muted card-sub">The bottom {Math.round(o.hotspots.share * 100)}% of {o.hotspots.restaurants} restaurants on sales and labor exceptions for this selection.</p>
         <div className="hotspot-list compact">
           {o.hotspots.top.map((s) => <HotspotCard key={s.id} s={s} single={single} compact />)}
         </div>
@@ -100,7 +87,7 @@ export default function Overview() {
 
       <div className="card">
         <div className="card-header"><h3>{childLabel}s compared</h3></div>
-        <p className="muted" style={{ marginTop: -6 }}>Sales vs. forecast. Select a bar or a name to drill in.</p>
+        <p className="muted card-sub">Sales vs. forecast. Select a bar or a name to drill in.</p>
         <VarianceBars data={o.breakdown} dataKey="sales_variance_pct" onSelect={(d) => navigate(childPath(d))} />
         <PerfTable rows={o.breakdown} linkFor={childPath} nameLabel={childLabel} subtitleFor={o.breakdownLevel === "area" ? (r) => r.area_manager : null} />
       </div>

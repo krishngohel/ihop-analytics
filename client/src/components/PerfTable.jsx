@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Delta, SeverityBadge } from "./Bits.jsx";
+import { Delta, SeverityBadge, VarCell } from "./Bits.jsx";
 import { fmt$, fmt$signed, fmtHoursSigned, fmtNum, fmtRating, salesTone, laborTone } from "../format.js";
 
 const COLUMNS = [
@@ -29,6 +29,9 @@ export default function PerfTable({ rows, linkFor, nameLabel = "Name", showSever
     });
     return out;
   }, [rows, sort]);
+  const maxOf = (key) => rows.reduce((m, r) => Math.max(m, Math.abs(r[key] ?? 0)), 0);
+  const maxSales = maxOf("sales_variance_pct");
+  const maxLabor = maxOf("labor_variance_pct");
   const columns = COLUMNS.filter((c) => c.key !== "hotspot_count" || !showSeverity);
   const clickSort = (key) => setSort((s) => (s.key === key ? { key, dir: -s.dir } : { key, dir: key === "name" ? 1 : key.includes("labor") ? -1 : 1 }));
 
@@ -40,7 +43,7 @@ export default function PerfTable({ rows, linkFor, nameLabel = "Name", showSever
             <th>#</th>
             {columns.map((c) => (
               <th key={c.key} className={c.text ? "" : "num"} aria-sort={sort.key === c.key ? (sort.dir === 1 ? "ascending" : "descending") : "none"}>
-                <button type="button" onClick={() => clickSort(c.key)}>{c.key === "name" ? nameLabel : c.label}{sort.key === c.key ? (sort.dir === 1 ? " ▲" : " ▼") : ""}</button>
+                <button type="button" onClick={() => clickSort(c.key)}>{c.key === "name" ? nameLabel : c.label}{sort.key === c.key ? (sort.dir === 1 ? " ↑" : " ↓") : ""}</button>
               </th>
             ))}
             {showSeverity && <th>Status</th>}
@@ -56,10 +59,10 @@ export default function PerfTable({ rows, linkFor, nameLabel = "Name", showSever
               </td>
               <td className="num money">{fmt$(r.actual_sales)}</td>
               <td className={`num money ${salesTone(r.sales_variance)}`}>{fmt$signed(r.sales_variance)}</td>
-              <td className="num"><Delta value={r.sales_variance_pct} /></td>
+              <td className="num"><VarCell value={r.sales_variance_pct} max={maxSales} /></td>
               <td className="num"><Delta value={r.prior_year_variance_pct} /></td>
               <td className={`num money ${laborTone(r.labor_variance)}`}>{fmtHoursSigned(r.labor_variance)}</td>
-              <td className="num"><Delta value={r.labor_variance_pct} kind="labor" /></td>
+              <td className="num"><VarCell value={r.labor_variance_pct} max={maxLabor} kind="labor" /></td>
               <td className="num money">{fmtRating(r.average_rating)}</td>
               <td className="num money">{fmtNum(r.survey_count)}</td>
               {!showSeverity && <td className="num money">{r.hotspot_count ? <strong>{r.hotspot_count}</strong> : 0}<span className="neutral"> / {r.restaurants}</span></td>}

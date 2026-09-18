@@ -4,14 +4,11 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App.jsx";
 import { AppProvider } from "./appContext.jsx";
 
-import "@fontsource/fraunces/400.css";
-import "@fontsource/fraunces/500.css";
-import "@fontsource/fraunces/600.css";
-import "@fontsource/fraunces/600-italic.css";
-import "@fontsource/ibm-plex-sans/400.css";
-import "@fontsource/ibm-plex-sans/500.css";
-import "@fontsource/ibm-plex-sans/600.css";
+import "@fontsource-variable/inter";
 import "./App.css";
+import { applyStoredTheme } from "./theme.js";
+
+applyStoredTheme();
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
