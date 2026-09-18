@@ -10,6 +10,7 @@ import { importDropFolder, ingestLog, importFolder, listPending } from "./import
 import { importMailbox, mailboxConfig } from "./mailbox.js";
 import { catchUp, generateLive } from "./sources/demo.js";
 import { syncRosnet, rosnetConfig } from "./sources/rosnet.js";
+import { syncPortal, portalConfig } from "./sources/rosnet-portal.js";
 import { storeDailySummary, storedDailySummary } from "./summary.js";
 
 let running = null;
@@ -54,6 +55,7 @@ export function runRefresh(trigger, { userEmail = null } = {}) {
     if (mailboxConfig().configured) await step(steps, "Import emailed reports", () => importMailbox());
     // After the files, so on a first run a store list has already put restaurants in their areas.
     if (rosnetConfig().configured) await step(steps, "Rosnet API: sales and labor", () => syncRosnet({ light }));
+    else if (portalConfig().configured) await step(steps, "Rosnet portal: sales and labor", () => syncPortal({ light }));
     if (!light) await step(steps, "Locate restaurants for weather", () => geocodeMissing());
 
     // Weather first: in demo mode the day's sales respond to it.
@@ -133,6 +135,7 @@ export function refreshStatus() {
     mailbox: (({ configured, host, user, folder, allowed }) => ({ configured, host, user, folder, allowed }))(mailboxConfig()),
     push_enabled: Boolean(process.env.INGEST_TOKEN),
     rosnet_api: (({ configured, user, clientId, baseUrl }) => ({ configured, user: configured ? user : null, client_id: clientId || null, host: baseUrl.replace(/^https?:\/\//, "") }))(rosnetConfig()),
+    rosnet_portal: (({ configured, username, client }) => ({ configured, user: configured ? username : null, client: client || null }))(portalConfig()),
     freshness: dataFreshness(),
     files: ingestLog(30),
   };

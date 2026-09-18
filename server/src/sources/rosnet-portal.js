@@ -1,0 +1,253 @@
+// Rosnet PowerCenter portal connector — the "bridge" route for a client who has a portal
+// login but no api.rosnet.com key yet. It signs in the way the portal's own web app does
+// (POST account.rosnet.com/api/login with the username and password, which returns a ~24h
+// token), then reads the same per-store data widgets the dashboard renders. Nothing is
+// written back to Rosnet; only its read-only report widgets are called.
+//
+// Unlike the official API (sources/rosnet.js), the portal exposes forecast sales, allowable
+// (forecast/earned) hours, region+area and daypart sales, so this route fills the dashboard
+// on its own. When an API key later arrives, that connector takes over and this one can be
+// left switched off.
+//
+// The portal login stores the client's website password (encrypted, see connections.js). It
+// only works while their account has MFA off; if Rosnet enforces MFA this route stops and the
+// emailed-report or API-key routes should be used instead.
+import db, { audit, setSetting, transaction } from "../db.js";
+import { addDays, comparableLastYear, today, yesterday } from "../dates.js";
+import { savePerformance } from "../performance.js";
+import { clearDemoData, logIngest } from "../imports.js";
+import { connectionValue } from "../connections.js";
+
+const ACCOUNT_URL = process.env.ROSNET_PORTAL_ACCOUNT_URL || "https://account.rosnet.com";
+const PORTAL_URL = process.env.ROSNET_PORTAL_URL || "https://portal.rosnet.com";
+// Backend services the gateway forwards to, by role. Overridable only for the test double.
+const SVC = process.env.ROSNET_PORTAL_SVC || "http://portal.rosnet.com:61021/api/v1.0/";
+const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0 Safari/537.36";
+
+export function portalConfig() {
+  const username = connectionValue("rosnet_portal_user");
+  const password = connectionValue("rosnet_portal_password");
+  return {
+    configured: Boolean(username && password),
+    username, password,
+    client: connectionValue("rosnet_portal_client"),      // e.g. "ACGTX"
+    clientId: connectionValue("rosnet_portal_client_id"), // e.g. "95"
+    backfillDays: Math.min(90, Math.max(1, Number(process.env.ROSNET_PORTAL_BACKFILL_DAYS) || 14)),
+  };
+}
+
+/** Signs in and returns the access token. Throws a clear message for the two common failures. */
+async function login(cfg) {
+  let res;
+  try {
+    res = await fetch(`${ACCOUNT_URL}/api/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json", "User-Agent": UA },
+      body: JSON.stringify({ username: cfg.username, password: cfg.password }),
+      signal: AbortSignal.timeout(30000),
+    });
+  } catch (e) {
+    throw new Error(`Couldn't reach the Rosnet portal sign-in: ${e.message}`);
+  }
+  if (res.status === 401 || res.status === 403) throw new Error("Rosnet rejected the portal username or password.");
+  if (!res.ok) throw new Error(`Rosnet portal sign-in failed (${res.status}).`);
+  const body = await res.json().catch(() => ({}));
+  const token = body.access_token || body.accessToken;
+  if (!token) {
+    // A body with no token but an OK status usually means an MFA / password-reset interstitial.
+    throw new Error(body.message && /mfa|verif|expir/i.test(body.message)
+      ? "This portal login needs a code or a password reset, so it can't be used unattended. Use the emailed-report route, or an API key."
+      : "Rosnet signed in but returned no access token.");
+  }
+  return token;
+}
+
+// One gateway data call. The portal reads auth from an access_token cookie shared across
+// .rosnet.com and picks the client from clientCode; the endpoint header names the backend.
+async function gateway(cfg, token, label, endpoint, body = null) {
+  const res = await fetch(`${PORTAL_URL}/api/gateway?${label}`, {
+    method: body ? "POST" : "GET",
+    headers: {
+      Accept: "application/json", "User-Agent": UA, endpoint,
+      clientId: cfg.clientId || "", "Content-Type": "application/json",
+      Cookie: `access_token=${token}; clientCode=${cfg.client || ""}`,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(60000),
+  });
+  if (!res.ok) throw new Error(`Rosnet portal ${label} answered ${res.status}`);
+  return res.json();
+}
+
+const svc = (path) => SVC + path;
+const num = (v) => (v === null || v === undefined || v === "" || Number.isNaN(Number(v)) ? null : Number(v));
+// Shared filter body: every location, one aggregate for the chosen period.
+const filter = (period, extra = {}) => ({
+  level1: [], level2: [], level3: [], level4: [], level5: [], displayBy: "level1",
+  displayPeriod: period, netGross: "net", daypartIds: [], salesCategoryIds: [], salesSubCategoryIds: [],
+  departmentIds: [], storeCompType: "all", ...extra,
+});
+const laborFilter = (period, extra = {}) => filter(period, { laborCategoryIds: [], laborJobIds: [], laborTypeName: "direct", ...extra });
+
+// Widget label -> {store id: value}. Bar widgets return labels[] like "1404 - Garland".
+const storeId = (label) => Number(String(label).match(/^\s*(\d+)/)?.[1]);
+function byStoreFromBars(widget, datasetLabel) {
+  const out = new Map();
+  const ds = (widget.datasets || []).find((d) => d.label === datasetLabel) || widget.datasets?.[0];
+  (widget.labels || []).forEach((lbl, i) => { const id = storeId(lbl); if (id) out.set(id, num(ds?.data[i])); });
+  return out;
+}
+function pairFromBars(widget, aLabel, bLabel) {
+  const a = byStoreFromBars(widget, aLabel);
+  const bDs = (widget.datasets || []).find((d) => d.label === bLabel);
+  const b = new Map();
+  (widget.labels || []).forEach((lbl, i) => { const id = storeId(lbl); if (id) b.set(id, num(bDs?.data[i])); });
+  return { a, b };
+}
+
+/**
+ * Locations with their region and area, matched to restaurants by store number. Rosnet's own
+ * labels are inverted from the dashboard's: Rosnet's top grouping (level3, "Area", e.g. "ACGTX
+ * North") is the dashboard's REGION, and its middle grouping (level2, "Region") is the
+ * dashboard's AREA. A store's parentValue is its level2; that level2's parent is its level3.
+ */
+async function syncLocations(cfg, token) {
+  const f = await gateway(cfg, token, "getLocationFilters", svc("LocationFilter"));
+  const stores = (f.level1?.choices || []).map((c) => ({
+    id: Number(c.value), number: String(c.value),
+    name: String(c.label).replace(/^\s*\d+\s*-\s*/, "").trim() || `Store ${c.value}`,
+    area: c.parentValue || null, // level2
+  }));
+  const areaToRegion = new Map((f.level2?.choices || []).map((c) => [c.value, c.parentValue || null])); // level2 -> level3
+  const known = new Map(db.prepare("SELECT restaurant_id, store_number FROM restaurant WHERE is_demo = 0 AND store_number IS NOT NULL").all()
+    .map((r) => [String(r.store_number).trim().replace(/^0+/, ""), r.restaurant_id]));
+  if (stores.length) clearDemoData();
+
+  const map = new Map();
+  const added = [];
+  transaction(() => {
+    for (const s of stores) {
+      const key = s.number.replace(/^0+/, "");
+      const areaName = s.area || "Rosnet";
+      const regionName = areaToRegion.get(s.area) || s.area || "Rosnet";
+      db.prepare("INSERT OR IGNORE INTO region (region_name) VALUES (?)").run(regionName);
+      const regionId = db.prepare("SELECT region_id FROM region WHERE region_name = ?").get(regionName).region_id;
+      db.prepare("INSERT OR IGNORE INTO area (area_name, region_id, area_manager) VALUES (?, ?, NULL)").run(areaName, regionId);
+      const areaId = db.prepare("SELECT area_id FROM area WHERE area_name = ? AND region_id = ?").get(areaName, regionId).area_id;
+      if (known.has(key)) {
+        db.prepare("UPDATE restaurant SET region_id = ?, area_id = ? WHERE restaurant_id = ?").run(regionId, areaId, known.get(key));
+        map.set(s.id, known.get(key));
+        continue;
+      }
+      const name = `IHOP #${s.id} ${s.name}`.trim();
+      const taken = db.prepare("SELECT 1 FROM restaurant WHERE restaurant_name = ?").get(name);
+      const rid = Number(db.prepare("INSERT INTO restaurant (restaurant_name, store_number, region_id, area_id, timezone) VALUES (?, ?, ?, ?, 'America/Chicago')")
+        .run(taken ? `${name} (#${s.id})` : name, s.number, regionId, areaId).lastInsertRowid);
+      map.set(s.id, rid);
+      added.push(name);
+    }
+  });
+  return { map, count: stores.length, added };
+}
+
+// Merges one period's widgets into a per-store row for one business date.
+async function syncPeriod(cfg, token, date, map, { live }) {
+  const period = live ? "RT" : "DAY";
+  const rows = new Map(); // restaurant_id -> row
+  const at = (id) => {
+    const rid = map.get(Number(id));
+    if (!rid) return null;
+    if (!rows.has(rid)) rows.set(rid, { date, restaurant_id: rid, daypart: "all", is_final: live ? 0 : 1 });
+    return rows.get(rid);
+  };
+
+  // Sales: actual + forecast (one widget), last year (comp widget).
+  const fc = await gateway(cfg, token, "AvF", svc("ActualVsForecastSales/widget"), filter(period));
+  const { a: actual, b: forecast } = pairFromBars(fc, "Actual Sales", "Forecast Sales");
+  for (const [id, v] of actual) { const r = at(id); if (r) r.actual_sales = v; }
+  for (const [id, v] of forecast) { const r = at(id); if (r && v !== null) r.forecast_sales = v; }
+  if (!live) {
+    const comp = await gateway(cfg, token, "Comp", svc("CompSalesByLocation/widget"), filter("DAY", { compPeriod: "comp", rtComp: "whole" }));
+    for (const [id, v] of byStoreFromBars(comp, "Comp")) { const r = at(id); if (r) r.prior_year_sales = v; }
+  }
+
+  // Labor: forecast(=allowable), scheduled, actual hours; and labor cost.
+  const hrs = await gateway(cfg, token, "Hrs", svc("LaborByLocation/ForecastActualTheoHoursByLocation/widget"), laborFilter(period));
+  for (const h of hrs.data || []) {
+    const r = at(h.locationNumber);
+    if (!r) continue;
+    r.actual_labor_hours = num(h.totalLaborHours);
+    r.scheduled_labor_hours = num(h.scheduledHours);
+    r.allowable_labor_hours = num(h.forecastHours) ?? num(h.scheduledHours); // earned/forecast hours = the plan
+  }
+  const cost = await gateway(cfg, token, "Cost", svc("LaborCostByLocation/widget"), laborFilter(period));
+  for (const c of cost.data || []) { const r = at(c.locationNumber); if (r) r.actual_labor_cost = num(c.laborAmout); }
+
+  let saved = 0;
+  transaction(() => {
+    for (const r of rows.values()) {
+      if (r.actual_sales === undefined && r.actual_labor_hours === undefined) continue;
+      savePerformance(r, "rosnet", { merge: true });
+      saved++;
+    }
+  });
+  return saved;
+}
+
+// The by-date sales report seeds several days of net sales in one call (one column per date).
+async function seedSalesHistory(cfg, token, map) {
+  const rep = await gateway(cfg, token, "ByDate", svc("SalesByLocationBusinessDate/report"), filter("7DR"));
+  const dateCols = (rep.headings || []).filter((h) => /^\d{2}\/\d{2}\/\d{4}$/.test(h));
+  let saved = 0;
+  transaction(() => {
+    for (const row of rep.data || []) {
+      const rid = map.get(Number(row.LocationNumber ?? row.locationNumber));
+      if (!rid) continue;
+      for (const col of dateCols) {
+        const [m, d, y] = col.split("/");
+        const iso = `${y}-${m}-${d}`;
+        if (iso >= today()) continue; // today is handled live, with its full metric set
+        savePerformance({ date: iso, restaurant_id: rid, daypart: "all", actual_sales: num(row[col]) }, "rosnet", { merge: true });
+        saved++;
+      }
+    }
+  });
+  return saved;
+}
+
+/** "Test connection": signs in and reports how many locations the portal shows. */
+export async function testPortal(override = {}) {
+  const cfg = { ...portalConfig(), ...Object.fromEntries(Object.entries(override).filter(([, v]) => v)) };
+  if (!cfg.username || !cfg.password) throw new Error("Enter the Rosnet portal username and password.");
+  const token = await login(cfg);
+  const f = await gateway(cfg, token, "getLocationFilters", svc("LocationFilter"));
+  const stores = f.level1?.choices || [];
+  return { locations: stores.length, client: cfg.client || null, sample: stores.slice(0, 5).map((c) => c.label.trim()) };
+}
+
+/**
+ * light (intraday): today's live sales only. Otherwise: yesterday's full snapshot, today's
+ * live sales, and — on the first run — a few days of net-sales history for the trend charts.
+ */
+export async function syncPortal({ light = false } = {}) {
+  const cfg = portalConfig();
+  if (!cfg.configured) return { skipped: "Rosnet portal username and password are not set" };
+  const token = await login(cfg);
+  const { map, count, added } = await syncLocations(cfg, token);
+  if (!map.size) return { locations: count, rows: 0, note: "The portal returned no locations for this login" };
+
+  let rows = 0;
+  if (!light) rows += await syncPeriod(cfg, token, yesterday(), map, { live: false });
+  rows += await syncPeriod(cfg, token, today(), map, { live: true });
+  const seededHistory = !light && !db.prepare("SELECT 1 FROM daily_performance WHERE source = 'rosnet' AND date < ? LIMIT 1").get(yesterday());
+  if (seededHistory) rows += await seedSalesHistory(cfg, token, map);
+
+  if (rows) setSetting("data_source", "import");
+  const detail = [added.length ? `${added.length} restaurants added` : null, seededHistory ? "seeded recent sales history" : null].filter(Boolean).join(" | ");
+  if (!light || added.length) {
+    logIngest({ channel: "rosnet_portal", filename: "Portal sales and labor", sender: PORTAL_URL.replace(/^https?:\/\//, ""), kind: "performance",
+      imported: rows, first_date: seededHistory ? addDays(today(), -cfg.backfillDays) : yesterday(), last_date: today(), status: rows ? "ok" : "rejected", detail: detail || null });
+    audit(null, "rosnet_portal_sync", `${rows} rows${added.length ? `, ${added.length} new restaurants` : ""}`);
+  }
+  return { rows, locations: count, new_restaurants: added };
+}

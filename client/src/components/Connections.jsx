@@ -43,11 +43,10 @@ export function SetupGuide({ setup }) {
       <div className="page-title-row"><h2>Get connected</h2><span className="muted">{steps.filter(Boolean).length} of {steps.length} done</span></div>
       <ol className="setup-steps">
         <Step n={1} done={setup.connected} title="Connect Rosnet">
-          Set up the reports mailbox below and have Rosnet email its scheduled reports there (in Rosnet these are push reports). If Rosnet has issued an API key, enter that too; it is optional.
+          Fastest: enter the client's Rosnet portal sign-in below and press Save — sales, forecast, labor and the store list load at once. Or use the reports mailbox, or an API key if the client has one. Any one is enough.
         </Step>
         <Step n={2} done={storesPlaced} title="Put restaurants in their regions and areas">
-          {setup.unassigned > 0 ? `${setup.unassigned} restaurants from Rosnet are waiting under "Unassigned". ` : ""}
-          Under Reports and layouts, import a store list once: Store Number, Restaurant, Region, Area, Area Manager, City, State.
+          The portal sign-in fills these in automatically. {setup.unassigned > 0 ? `${setup.unassigned} restaurants are waiting under "Unassigned" — ` : ""}{setup.unassigned > 0 ? "import a store list once (Store Number, Restaurant, Region, Area, Area Manager, City, State) to place them." : "With the mailbox or a plain API key, import a store list once to set regions and areas."}
         </Step>
         <Step n={3} done={setup.results} title="Load sales and labor">
           Export the last few weeks from Rosnet (sales, labor) and import them under Reports and layouts. The layout is remembered, so the emailed copies load on their own from then on. {setup.pending > 0 ? `${setup.pending} emailed ${setup.pending === 1 ? "report is" : "reports are"} waiting there for a one-time column check.` : ""}
@@ -100,6 +99,50 @@ function RosnetCard({ fields, status, onSaved }) {
         </div>
       )}
       <TestResult result={result}>{(r) => <>Connected. Rosnet shows {r.locations} open restaurants{r.sample?.length ? `: ${r.sample.join(", ")}${r.locations > r.sample.length ? "…" : ""}` : ""}.</>}</TestResult>
+    </section>
+  );
+}
+
+function PortalCard({ fields, status, onSaved }) {
+  const { refreshNow } = useApp();
+  const [form, set] = useForm(fields, ["rosnet_portal_user", "rosnet_portal_client", "rosnet_portal_client_id"]);
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState("");
+  const [result, setResult] = useState(null);
+  const locked = fields.rosnet_portal_user.from_environment || fields.rosnet_portal_password.from_environment;
+  const body = { ...form, rosnet_portal_password: password };
+
+  const test = async () => { setBusy("test"); setResult(null); try { setResult(await testConnection("portal", body)); } catch (e) { setResult({ ok: false, error: e.message }); } finally { setBusy(""); } };
+  const save = async () => {
+    setBusy("save"); setResult(null);
+    try {
+      const check = await testConnection("portal", body);
+      setResult(check);
+      if (!check.ok) return;
+      await saveConnections(body);
+      setPassword("");
+      await onSaved();
+      await refreshNow(); // first pull, so results land without anyone pressing Refresh
+      await onSaved();
+    } catch (e) { setResult({ ok: false, error: e.message }); } finally { setBusy(""); }
+  };
+
+  return (
+    <section className={`connection${status.rosnet_portal?.configured ? " on" : ""}`}>
+      <div className="channel-head"><strong>Rosnet portal sign-in</strong><ToneBadge tone={status.rosnet_portal?.configured ? "ok" : "neutral"}>{status.rosnet_portal?.configured ? "Connected" : "Not set up"}</ToneBadge></div>
+      <p className="muted">The bridge until an API key arrives: the dashboard signs in to the Rosnet portal the way you do on the website, and reads sales, forecast, labor, allowable hours, regions and dayparts on every refresh — no reports to schedule. The password is stored encrypted. It only works while the account has no login code (MFA); if Rosnet ever asks for a code, use the reports mailbox instead.</p>
+      {locked ? <p className="muted">Set on the server by ROSNET_PORTAL_USER and ROSNET_PORTAL_PASSWORD.</p> : (
+        <div className="connection-form">
+          <label>Portal username<input value={form.rosnet_portal_user || ""} onChange={set("rosnet_portal_user")} autoComplete="off" spellCheck="false" placeholder="the email you sign in with" /></label>
+          <label>Portal password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" placeholder={fields.rosnet_portal_password.on_file ? "On file. Leave blank to keep it" : ""} /></label>
+          <label>Client code <span className="neutral">(if you have more than one)</span><input value={form.rosnet_portal_client || ""} onChange={set("rosnet_portal_client")} autoComplete="off" spellCheck="false" placeholder="e.g. ACGTX" /></label>
+          <div className="connection-actions">
+            <button type="button" className="btn secondary small" onClick={test} disabled={Boolean(busy)}>{busy === "test" ? "Testing…" : "Test connection"}</button>
+            <button type="button" className="btn small" onClick={save} disabled={Boolean(busy) || !form.rosnet_portal_user || (!password && !fields.rosnet_portal_password.on_file)}>{busy === "save" ? "Connecting and loading…" : "Save and load data"}</button>
+          </div>
+        </div>
+      )}
+      <TestResult result={result}>{(r) => <>Signed in{r.client ? ` to ${r.client}` : ""}. The portal shows {r.locations} restaurants{r.sample?.length ? `: ${r.sample.join(", ")}${r.locations > r.sample.length ? "…" : ""}` : ""}.</>}</TestResult>
     </section>
   );
 }
@@ -198,10 +241,11 @@ export default function Connections({ status, reload, version }) {
       <SetupGuide setup={data.setup} />
       <div className="card" id="connections">
         <h3>Connections</h3>
-        <p className="muted card-sub">How results reach the dashboard with nobody involved. Every refresh, including the scheduled ones, checks each of these. The dashboard never signs in to the Rosnet or STARS websites, and passwords entered here are stored encrypted and never shown again.</p>
+        <p className="muted card-sub">How results reach the dashboard with nobody involved. Every refresh, including the scheduled ones, checks each of these. Set up whichever one the client can give you — any single one fills the dashboard. Passwords entered here are stored encrypted and never shown again.</p>
         <div className="connections">
-          <MailboxCard fields={data.fields} status={status} onSaved={onSaved} />
+          <PortalCard fields={data.fields} status={status} onSaved={onSaved} />
           <RosnetCard fields={data.fields} status={status} onSaved={onSaved} />
+          <MailboxCard fields={data.fields} status={status} onSaved={onSaved} />
           <FolderCard fields={data.fields} status={status} onSaved={onSaved} />
           {status.push_enabled && (
             <section className="connection on">

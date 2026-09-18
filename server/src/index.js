@@ -15,6 +15,7 @@ import { ingestFile, previewFile, listProfiles, deleteProfile, templateWorkbook,
 import { runRefresh, refreshStatus, startScheduler, dataFreshness } from "./refresh.js";
 import { describeConnections, saveConnectionValues } from "./connections.js";
 import { testRosnet, rosnetConfig } from "./sources/rosnet.js";
+import { testPortal, portalConfig } from "./sources/rosnet-portal.js";
 import { testMailbox, mailboxConfig } from "./mailbox.js";
 import { storeDailySummary } from "./summary.js";
 import { weatherContext } from "./weather.js";
@@ -291,8 +292,9 @@ const setupStatus = () => {
   // Reports landing by folder or push in the last few days count as connected too.
   const arriving = count("SELECT COUNT(*) n FROM ingest_file WHERE channel IN ('folder', 'push', 'mailbox') AND imported > 0 AND received_at > datetime('now', '-3 days')") > 0;
   return {
-    connected: rosnetConfig().configured || (mailboxConfig().configured && mailboxConfig().allowed.length > 0) || arriving,
+    connected: rosnetConfig().configured || portalConfig().configured || (mailboxConfig().configured && mailboxConfig().allowed.length > 0) || arriving,
     rosnet_api: rosnetConfig().configured,
+    rosnet_portal: portalConfig().configured,
     mailbox: mailboxConfig().configured,
     trusted_senders: mailboxConfig().allowed.length > 0,
     restaurants: realStores,
@@ -316,6 +318,7 @@ app.post("/api/connections/test/:which", requireRole("executive"), async (req, r
   const b = req.body || {};
   try {
     if (req.params.which === "rosnet") return res.json({ ok: true, ...(await testRosnet({ user: b.rosnet_api_user, key: b.rosnet_api_key, clientId: b.rosnet_client_id })) });
+    if (req.params.which === "portal") return res.json({ ok: true, ...(await testPortal({ username: b.rosnet_portal_user, password: b.rosnet_portal_password, client: b.rosnet_portal_client, clientId: b.rosnet_portal_client_id })) });
     if (req.params.which === "mailbox") return res.json({ ok: true, ...(await testMailbox({ user: b.reports_imap_user, password: b.reports_imap_password, host: b.reports_imap_host, port: b.reports_imap_port })) });
     return res.status(404).json({ error: "Unknown connection" });
   } catch (e) {
