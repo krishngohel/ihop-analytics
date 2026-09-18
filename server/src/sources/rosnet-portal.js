@@ -238,6 +238,8 @@ async function syncPeriod(cfg, token, date, map, { live }) {
   const cost = await gateway(cfg, token, "Cost", svc("LaborCostByLocation/widget"), laborFilter(period));
   for (const c of cost.data || []) { const r = at(c.locationNumber); if (r) r.actual_labor_cost = num(c.laborAmout); }
 
+  const dayparts = await daypartRows(cfg, token, date, map, period).catch(() => []);
+
   let saved = 0;
   transaction(() => {
     for (const r of rows.values()) {
@@ -245,8 +247,61 @@ async function syncPeriod(cfg, token, date, map, { live }) {
       savePerformance(r, "rosnet", { merge: true });
       saved++;
     }
+    for (const d of dayparts) savePerformance(d, "rosnet", { merge: true });
   });
   return saved;
+}
+
+// Rosnet's six dayparts fold into the dashboard's four.
+const DAYPART_MAP = { "1-Breakfast": "breakfast", "2-Lunch": "lunch", "3-Carryover": "lunch", "4-Dinner": "dinner", "5-Late Night": "late_night", "6-Overnight": "late_night" };
+
+/**
+ * Per-store sales for each daypart. Actual is per store (SalesByLocationDaypart); forecast and
+ * last year are only reported at company level, so they are allocated to each store by its share
+ * of that daypart's actual — which sums back to the exact company figure, so the company daypart
+ * card reads correctly while each store gets a sensible split.
+ */
+async function daypartRows(cfg, token, date, map, period) {
+  const perStore = await gateway(cfg, token, "DaypartSales", svc("SalesByLocationDaypart/widget"), filter(period));
+  const avf = await gateway(cfg, token, "AvFDaypart", svc("ActualVsForecastSalesByDaypart/widget"), filter(period));
+  const comp = await gateway(cfg, token, "CompDaypart", svc("CompSalesByDaypart/widget"), filter(period, { compPeriod: "comp" })).catch(() => ({}));
+
+  // Company forecast / last year per dashboard daypart, from the company widgets' bar data.
+  const companyBy = (widget, label) => {
+    const ds = (widget.datasets || []).find((d) => d.label === label);
+    const out = {};
+    (widget.labels || []).forEach((rl, i) => { const dp = DAYPART_MAP[rl]; if (dp) out[dp] = (out[dp] || 0) + (num(ds?.data[i]) || 0); });
+    return out;
+  };
+  const compForecast = companyBy(avf, "Forecast Sales");
+  const compLastYear = companyBy(comp, "Comp Sales By Daypart");
+
+  // Per store, per dashboard daypart: actual.
+  const perStoreActual = new Map(); // rid -> { dp: actual }
+  const companyActual = {};
+  for (const r of perStore.data || []) {
+    const rid = map.get(Number(r.LocationNumber ?? r.locationNumber));
+    if (!rid) continue;
+    const byDp = perStoreActual.get(rid) || {};
+    for (const [rl, dp] of Object.entries(DAYPART_MAP)) {
+      const v = num(r[rl]);
+      if (v !== null) { byDp[dp] = (byDp[dp] || 0) + v; companyActual[dp] = (companyActual[dp] || 0) + v; }
+    }
+    perStoreActual.set(rid, byDp);
+  }
+
+  const out = [];
+  for (const [rid, byDp] of perStoreActual) {
+    for (const [dp, actual] of Object.entries(byDp)) {
+      const share = companyActual[dp] ? actual / companyActual[dp] : 0;
+      out.push({
+        date, restaurant_id: rid, daypart: dp, actual_sales: actual,
+        forecast_sales: compForecast[dp] !== undefined ? compForecast[dp] * share : null,
+        prior_year_sales: compLastYear[dp] !== undefined ? compLastYear[dp] * share : null,
+      });
+    }
+  }
+  return out;
 }
 
 // The by-date sales report seeds several days of net sales in one call (one column per date).
