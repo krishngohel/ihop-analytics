@@ -15,6 +15,7 @@ export function rangeForPreset(preset, meta) {
     case "ptd": return { from: meta.period.from, to: last };
     case "last7": return { from: addDays(last, -6), to: last };
     case "last28": return { from: addDays(last, -27), to: last };
+    case "last13w": return { from: addDays(weekStart(last), -84), to: last };
     default: return { from: last, to: last };
   }
 }

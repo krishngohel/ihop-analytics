@@ -74,3 +74,9 @@ export const previewPending = (name, kind) => sendJSON("POST", `/api/import/pend
 export const commitPending = (name, { kind, mapping, profileName }) => sendJSON("POST", `/api/import/pending/${encodeURIComponent(name)}/commit`, { kind, mapping, profileName });
 export const discardPending = (name) => request(`/api/import/pending/${encodeURIComponent(name)}`, { method: "DELETE" });
 export const deleteImportProfile = (id) => request(`/api/import/profiles/${id}`, { method: "DELETE" });
+
+// Trends, and the files people take away. The downloads are plain links so the browser
+// handles the file; these build the URL for the current selection.
+export const getTrends = (params) => getJSON("/api/trends", params);
+export const excelExportUrl = (params) => { const q = qs(params); return `/api/export/excel${q ? "?" + q : ""}`; };
+export const weeklyReportUrl = (params) => { const q = qs(params); return `/api/export/report${q ? "?" + q : ""}`; };

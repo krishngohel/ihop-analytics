@@ -23,6 +23,9 @@ export const CheckIcon = (p) => <Icon {...p}><path d="m5 12.5 4.5 4.5L19 7.5" />
 export const AlertIcon = (p) => <Icon {...p}><path d="M12 4 2.5 20h19L12 4z" /><path d="M12 10v4.5M12 17.5v.01" /></Icon>;
 export const EyeIcon = (p) => <Icon {...p}><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></Icon>;
 export const StarIcon = (p) => <Icon {...p}><path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9L12 3z" /></Icon>;
+export const TrendIcon = (p) => <Icon {...p}><path d="M3 17 9 11l4 4 8-8" /><path d="M14 7h7v7" /><path d="M3 21h18" /></Icon>;
+export const ReportIcon = (p) => <Icon {...p}><path d="M6 3h9l4 4v14H6z" /><path d="M15 3v4h4" /><path d="M9 17v-4M12 17v-7M15 17v-2" /></Icon>;
+export const DownloadIcon = (p) => <Icon {...p}><path d="M12 4v11" /><path d="m7 10 5 5 5-5" /><path d="M4 19h16" /></Icon>;
 export const InfoIcon = (p) => <Icon {...p}><circle cx="12" cy="12" r="9" /><path d="M12 11v5.5M12 7.5v.01" /></Icon>;
 
 export function BrandMark() {

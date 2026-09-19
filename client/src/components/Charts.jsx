@@ -165,3 +165,142 @@ export function VarianceBars({ data, dataKey, goodWhenPositive = true, onSelect,
     </>
   );
 }
+
+// ---- Trends page charts -------------------------------------------------------------------
+
+/** Any daily series with its own formatter: guest rating, labor cost share, and so on. */
+export function MetricTrend({ data, series, format, tick, height = 220 }) {
+  return <Trend data={data} height={height} format={format} tick={tick || format} series={series} />;
+}
+
+const pctTick = (v) => `${v}%`;
+const weekLabel = (w) => prettyDay(w, { month: "short", day: "numeric" });
+
+/** Weekly totals as grouped columns: actual, forecast and last year side by side. */
+export function WeeklyBars({ data, height = 260 }) {
+  if (!data?.length) return null;
+  const series = [
+    { key: "actual_sales", name: "Actual", color: SERIES.actual },
+    { key: "forecast_basis", name: "Forecast", color: SERIES.forecast },
+    { key: "prior_year_sales", name: "Last year", color: SERIES.lastYear },
+  ];
+  return (
+    <>
+      <Legend items={series.map((s) => ({ label: s.name, color: s.color }))} />
+      <ResponsiveContainer width="100%" height={height}>
+        <BarChart data={data} margin={{ top: 8, right: 12, bottom: 0, left: 0 }} barCategoryGap={18} barGap={2}>
+          <CartesianGrid stroke="var(--grid)" vertical={false} />
+          <XAxis dataKey="week_start" tick={AXIS} tickFormatter={(w) => `Wk of ${weekLabel(w)}`} tickLine={false} axisLine={{ stroke: "var(--axis)" }} tickMargin={6} />
+          <YAxis tick={AXIS} tickFormatter={dollarsTick} width={58} tickLine={false} axisLine={false} />
+          <Tooltip cursor={{ fill: "var(--surface-2)" }} content={<Tip title={(w, p) => `Week of ${weekLabel(w)}${p[0]?.payload?.partial ? ` (${p[0].payload.days} days)` : ""}`} format={fmt$} />} />
+          {series.map((s) => <Bar key={s.key} name={s.name} dataKey={s.key} fill={s.color} maxBarSize={34} radius={[3, 3, 0, 0]} isAnimationActive={false} />)}
+        </BarChart>
+      </ResponsiveContainer>
+    </>
+  );
+}
+
+/** Sales vs. forecast and labor vs. allowable, day by day, around a zero line. */
+export function VarianceTrend({ data, height = 220 }) {
+  if (!data?.length) return null;
+  const series = [
+    { key: "sales_variance_pct", name: "Sales vs. forecast", color: SERIES.actual },
+    { key: "labor_variance_pct", name: "Labor vs. allowable", color: SERIES.forecast },
+  ];
+  return (
+    <>
+      <Legend items={series.map((s) => ({ label: s.name, color: s.color }))} />
+      <ResponsiveContainer width="100%" height={height}>
+        <ComposedChart data={data} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
+          <CartesianGrid stroke="var(--grid)" vertical={false} />
+          <XAxis dataKey="date" tick={AXIS} tickFormatter={shortDay} minTickGap={36} tickLine={false} axisLine={{ stroke: "var(--axis)" }} tickMargin={6} />
+          <YAxis tick={AXIS} tickFormatter={pctTick} width={48} tickLine={false} axisLine={false} domain={["auto", "auto"]} />
+          <ReferenceLine y={0} stroke="var(--axis)" />
+          <Tooltip cursor={{ stroke: "var(--axis)", strokeWidth: 1 }} content={<Tip title={longDay} format={fmtPct} />} />
+          {series.map((s) => <Line key={s.key} name={s.name} type="monotone" dataKey={s.key} stroke={s.color} strokeWidth={2} dot={{ r: 2.5, strokeWidth: 0, fill: s.color }} activeDot={{ r: 5, stroke: "var(--surface)", strokeWidth: 2 }} connectNulls={false} isAnimationActive={false} />)}
+        </ComposedChart>
+      </ResponsiveContainer>
+    </>
+  );
+}
+
+/** The average day for each weekday. */
+export function WeekdayBars({ data, height = 240 }) {
+  if (!data?.length) return null;
+  const series = [
+    { key: "avg_actual_sales", name: "Average sales", color: SERIES.actual },
+    { key: "avg_forecast_sales", name: "Average forecast", color: SERIES.forecast },
+    { key: "avg_prior_year_sales", name: "Average last year", color: SERIES.lastYear },
+  ];
+  return (
+    <>
+      <Legend items={series.map((s) => ({ label: s.name, color: s.color }))} />
+      <ResponsiveContainer width="100%" height={height}>
+        <BarChart data={data} margin={{ top: 8, right: 12, bottom: 0, left: 0 }} barCategoryGap={18} barGap={2}>
+          <CartesianGrid stroke="var(--grid)" vertical={false} />
+          <XAxis dataKey="short" tick={AXIS} tickLine={false} axisLine={{ stroke: "var(--axis)" }} tickMargin={6} />
+          <YAxis tick={AXIS} tickFormatter={dollarsTick} width={58} tickLine={false} axisLine={false} />
+          <Tooltip cursor={{ fill: "var(--surface-2)" }} content={<Tip title={(_, p) => `${p[0]?.payload?.weekday} · ${p[0]?.payload?.days} day${p[0]?.payload?.days === 1 ? "" : "s"} on file`} format={fmt$} />} />
+          {series.map((s) => <Bar key={s.key} name={s.name} dataKey={s.key} fill={s.color} maxBarSize={30} radius={[3, 3, 0, 0]} isAnimationActive={false} />)}
+        </BarChart>
+      </ResponsiveContainer>
+    </>
+  );
+}
+
+const DAYPART_SERIES = [
+  { key: "breakfast", name: "Breakfast", color: "var(--series-5)" },
+  { key: "lunch", name: "Lunch", color: "var(--series-1)" },
+  { key: "dinner", name: "Dinner", color: "var(--series-4)" },
+  { key: "late_night", name: "Late night", color: "var(--series-3)" },
+];
+
+/** Each day's sales stacked by daypart. */
+export function DaypartStack({ data, height = 240 }) {
+  if (!data?.length) return null;
+  return (
+    <>
+      <Legend items={DAYPART_SERIES.map((s) => ({ label: s.name, color: s.color }))} />
+      <ResponsiveContainer width="100%" height={height}>
+        <BarChart data={data} margin={{ top: 8, right: 12, bottom: 0, left: 0 }} barCategoryGap={4}>
+          <CartesianGrid stroke="var(--grid)" vertical={false} />
+          <XAxis dataKey="date" tick={AXIS} tickFormatter={shortDay} minTickGap={36} tickLine={false} axisLine={{ stroke: "var(--axis)" }} tickMargin={6} />
+          <YAxis tick={AXIS} tickFormatter={dollarsTick} width={58} tickLine={false} axisLine={false} />
+          <Tooltip cursor={{ fill: "var(--surface-2)" }} content={<Tip title={longDay} format={fmt$} />} />
+          {DAYPART_SERIES.map((s) => <Bar key={s.key} name={s.name} dataKey={s.key} stackId="day" fill={s.color} maxBarSize={40} isAnimationActive={false} />)}
+        </BarChart>
+      </ResponsiveContainer>
+    </>
+  );
+}
+
+const GROUP_COLORS = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)", "var(--series-5)", "var(--series-6)"];
+
+/** One line per region / area / restaurant: sales against forecast over time. */
+export function GroupLines({ rows, groups, metric = "variance", height = 260, onSelect }) {
+  if (!rows?.length || !groups?.length) return null;
+  const shown = groups.slice(0, 6);
+  const items = shown.map((g, i) => ({ ...g, color: GROUP_COLORS[i % GROUP_COLORS.length], key: `${metric}_${g.id}` }));
+  return (
+    <>
+      <div className="chart-legend">
+        {items.map((g) => (
+          <span key={g.id} style={{ cursor: onSelect ? "pointer" : "default" }} onClick={() => onSelect && onSelect(g)}>
+            <i style={{ borderTopColor: g.color }} />{String(g.name).replace(/^IHOP /, "")}
+          </span>
+        ))}
+        {groups.length > shown.length && <span className="muted">and {groups.length - shown.length} more in the table</span>}
+      </div>
+      <ResponsiveContainer width="100%" height={height}>
+        <ComposedChart data={rows} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
+          <CartesianGrid stroke="var(--grid)" vertical={false} />
+          <XAxis dataKey="date" tick={AXIS} tickFormatter={shortDay} minTickGap={36} tickLine={false} axisLine={{ stroke: "var(--axis)" }} tickMargin={6} />
+          <YAxis tick={AXIS} tickFormatter={pctTick} width={48} tickLine={false} axisLine={false} domain={["auto", "auto"]} />
+          <ReferenceLine y={0} stroke="var(--axis)" />
+          <Tooltip cursor={{ stroke: "var(--axis)", strokeWidth: 1 }} content={<Tip title={longDay} format={fmtPct} />} />
+          {items.map((g) => <Line key={g.id} name={String(g.name).replace(/^IHOP /, "")} type="monotone" dataKey={g.key} stroke={g.color} strokeWidth={1.75} dot={false} activeDot={{ r: 4, stroke: "var(--surface)", strokeWidth: 2 }} connectNulls={false} isAnimationActive={false} />)}
+        </ComposedChart>
+      </ResponsiveContainer>
+    </>
+  );
+}

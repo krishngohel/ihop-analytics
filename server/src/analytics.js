@@ -26,16 +26,22 @@ const GROUPS = {
 };
 const JOINS = "JOIN restaurant r ON r.restaurant_id = p.restaurant_id JOIN area a ON a.area_id = r.area_id JOIN region g ON g.region_id = r.region_id";
 
+// A variance only counts the days that have both sides. Sales history can reach further
+// back than forecasts or last-year figures do, and a comparison of eight days of sales
+// with two days of forecast would be meaningless, so each one uses the "covered" sales.
 export function derive(row) {
   const out = { ...row };
-  out.sales_variance = row.actual_sales !== null && row.forecast_basis !== null ? row.actual_sales - row.forecast_basis : null;
+  const covered = row.forecast_covered_sales ?? row.actual_sales;
+  out.sales_variance = covered !== null && covered !== undefined && row.forecast_basis !== null && row.forecast_basis !== undefined ? covered - row.forecast_basis : null;
   out.sales_variance_pct = out.sales_variance === null ? null : pct(out.sales_variance, row.forecast_basis);
-  out.prior_year_variance = row.final_actual_sales !== null && row.prior_year_sales ? row.final_actual_sales - row.prior_year_sales : null;
+  const priorCovered = row.prior_covered_sales ?? row.final_actual_sales;
+  out.prior_year_variance = priorCovered !== null && priorCovered !== undefined && row.prior_year_sales ? priorCovered - row.prior_year_sales : null;
   out.prior_year_variance_pct = out.prior_year_variance === null ? null : pct(out.prior_year_variance, row.prior_year_sales);
   out.labor_variance = row.actual_labor_hours !== null && row.allowable_labor_hours ? row.actual_labor_hours - row.allowable_labor_hours : null;
   out.labor_variance_pct = out.labor_variance === null ? null : pct(out.labor_variance, row.allowable_labor_hours);
   out.scheduled_variance = row.scheduled_labor_hours !== null && row.allowable_labor_hours ? row.scheduled_labor_hours - row.allowable_labor_hours : null;
-  out.labor_cost_pct = row.actual_labor_cost && row.day_sales ? pct(row.actual_labor_cost, row.day_sales) : null;
+  const laborSales = row.labor_covered_sales ?? row.day_sales;
+  out.labor_cost_pct = row.actual_labor_cost && laborSales ? pct(row.actual_labor_cost, laborSales) : null;
   return out;
 }
 
@@ -52,8 +58,10 @@ export function metrics(user, { from, to, daypart = "all", groupBy = "company", 
       SUM(p.actual_sales) AS actual_sales,
       SUM(p.forecast_sales) AS forecast_sales,
       SUM(CASE WHEN p.is_final = 0 THEN p.forecast_to_now ELSE p.forecast_sales END) AS forecast_basis,
+      SUM(CASE WHEN (CASE WHEN p.is_final = 0 THEN p.forecast_to_now ELSE p.forecast_sales END) IS NOT NULL THEN p.actual_sales END) AS forecast_covered_sales,
       SUM(CASE WHEN p.is_final = 1 THEN p.actual_sales END) AS final_actual_sales,
       SUM(CASE WHEN p.is_final = 1 THEN p.prior_year_sales END) AS prior_year_sales,
+      SUM(CASE WHEN p.is_final = 1 AND p.prior_year_sales IS NOT NULL THEN p.actual_sales END) AS prior_covered_sales,
       MIN(p.is_final) AS is_final
     FROM daily_performance p ${JOINS}
     WHERE p.daypart = ? AND p.date BETWEEN ? AND ?${f.sql}
@@ -61,6 +69,7 @@ export function metrics(user, { from, to, daypart = "all", groupBy = "company", 
   const labor = db.prepare(`
     SELECT ${group.key} AS id,
       SUM(p.actual_sales) AS day_sales,
+      SUM(CASE WHEN p.actual_labor_cost IS NOT NULL THEN p.actual_sales END) AS labor_covered_sales,
       SUM(p.actual_labor_hours) AS actual_labor_hours,
       SUM(p.scheduled_labor_hours) AS scheduled_labor_hours,
       SUM(p.allowable_labor_hours) AS allowable_labor_hours,
@@ -82,7 +91,7 @@ export function metrics(user, { from, to, daypart = "all", groupBy = "company", 
 
   const laborById = new Map(labor.map((r) => [r.id, r]));
   const guestById = new Map(guest.map((r) => [r.id, r]));
-  const emptyLabor = { day_sales: null, actual_labor_hours: null, scheduled_labor_hours: null, allowable_labor_hours: null, manager_hours: null, actual_labor_cost: null, opening_issues: 0 };
+  const emptyLabor = { day_sales: null, labor_covered_sales: null, actual_labor_hours: null, scheduled_labor_hours: null, allowable_labor_hours: null, manager_hours: null, actual_labor_cost: null, opening_issues: 0 };
   const emptyGuest = { survey_count: 0, average_rating: null, google_review_count: 0, google_rating: null };
   return sales.map((s) => {
     const g = guestById.get(s.id) || emptyGuest;

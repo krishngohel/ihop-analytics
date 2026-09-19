@@ -8,6 +8,7 @@ const PRESETS = [
   { key: "ptd", label: "Period to date" },
   { key: "last7", label: "Last 7 days" },
   { key: "last28", label: "Last 28 days" },
+  { key: "last13w", label: "Last 13 weeks" },
 ];
 
 // Filters sit in one row above the content and apply to everything on the page.

@@ -20,6 +20,9 @@ import { testMailbox, mailboxConfig } from "./mailbox.js";
 import { storeDailySummary } from "./summary.js";
 import { weatherContext } from "./weather.js";
 import { addDays, comparableLastYear, fiscalPeriod, isDay, today, weekStart, yesterday, prettyDate } from "./dates.js";
+import { trendsData } from "./trends.js";
+import { buildWorkbook } from "./export.js";
+import { buildWeeklyReport } from "./report.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -186,12 +189,13 @@ app.get("/api/stores/:id", (req, res) => {
   const history = dailySeries(req.user, { from: addDays(weekStart(lastFinal), -84), to: lastFinal, daypart, filters });
   const sumGroup = (rows, label, extra = {}) => {
     const s = (k) => rows.reduce((t, r) => t + (r[k] || 0), 0);
-    const actual = s("actual_sales"); const basis = s("forecast_basis"); const prior = s("prior_year_sales"); const finalActual = s("final_actual_sales");
+    const actual = s("actual_sales"); const basis = s("forecast_basis"); const prior = s("prior_year_sales");
+    const covered = s("forecast_covered_sales"); const priorCovered = s("prior_covered_sales"); // only days that have both sides
     const hrs = s("actual_labor_hours"); const allow = s("allowable_labor_hours");
     const surveys = s("survey_count");
     return { label, ...extra, days: rows.length, actual_sales: actual, forecast_sales: s("forecast_sales"), prior_year_sales: prior,
-      sales_variance: actual - basis, sales_variance_pct: basis ? Math.round(((actual - basis) / basis) * 1000) / 10 : null,
-      prior_year_variance_pct: prior ? Math.round(((finalActual - prior) / prior) * 1000) / 10 : null,
+      sales_variance: basis ? covered - basis : null, sales_variance_pct: basis ? Math.round(((covered - basis) / basis) * 1000) / 10 : null,
+      prior_year_variance_pct: prior ? Math.round(((priorCovered - prior) / prior) * 1000) / 10 : null,
       actual_labor_hours: hrs, allowable_labor_hours: allow, labor_variance: hrs - allow, labor_variance_pct: allow ? Math.round(((hrs - allow) / allow) * 1000) / 10 : null,
       survey_count: surveys, average_rating: surveys ? Math.round((rows.reduce((t, r) => t + (r.average_rating || 0) * (r.survey_count || 0), 0) / surveys) * 100) / 100 : null };
   };
@@ -232,6 +236,45 @@ app.get("/api/stores/:id", (req, res) => {
     anomalies: anomalies.reverse(),
     latestStatus: hsDay ? { severity: hsDay.severity, flags: hsDay.flags, weather_note: hsDay.weather_note, date: lastFinal } : null,
   });
+});
+
+// ---- trends, and the files people take away ---------------------------------------------
+app.get("/api/trends", (req, res) => {
+  const { from, to, daypart, filters } = readRange(req);
+  res.json(trendsData(req.user, { from, to, daypart, filters }));
+});
+
+function scopeName(req, filters) {
+  if (filters.areaId) return db.prepare("SELECT area_name FROM area WHERE area_id = ?").get(Number(filters.areaId))?.area_name || "Area";
+  if (filters.regionId) return db.prepare("SELECT region_name FROM region WHERE region_id = ?").get(Number(filters.regionId))?.region_name || "Region";
+  return req.user.role === "executive" ? "All restaurants" : publicUser(req.user).scope_name;
+}
+const fileSafe = (s) => String(s).replace(/[^\w.-]+/g, " ").trim();
+
+app.get("/api/export/excel", (req, res) => {
+  const { from, to, daypart, filters } = readRange(req);
+  const scope = scopeName(req, filters);
+  const buffer = buildWorkbook(req.user, { from, to, daypart, filters }, { scopeName: scope });
+  audit(req.user.email, "excel_exported", `${scope} ${from} to ${to} ${daypart}`);
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="${fileSafe(`IHOP Operations ${scope} ${from} to ${to}`)}.xlsx"`);
+  res.send(buffer);
+});
+
+// The weekly report covers the Monday-to-Sunday week that holds `to` (or the latest full week).
+app.get("/api/export/report", (req, res) => {
+  const wantWeek = isDay(req.query.week) ? weekStart(req.query.week) : weekStart(lastFinalDay());
+  const lastFinal = lastFinalDay();
+  const from = wantWeek;
+  const to = addDays(from, 6) <= lastFinal ? addDays(from, 6) : lastFinal;
+  if (from > lastFinal) return res.status(400).json({ error: "That week has no results on file yet." });
+  const filters = { regionId: req.query.regionId || null, areaId: req.query.areaId || null };
+  const scope = scopeName(req, filters);
+  const buffer = buildWeeklyReport(req.user, { from, to, filters }, { scopeName: scope });
+  audit(req.user.email, "weekly_report_exported", `${scope} week of ${from}`);
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `${req.query.inline ? "inline" : "attachment"}; filename="${fileSafe(`IHOP Weekly Report ${scope} week of ${from}`)}.pdf"`);
+  res.send(buffer);
 });
 
 // ---- daily morning summary -----------------------------------------------------------

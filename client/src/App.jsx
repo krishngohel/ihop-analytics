@@ -4,7 +4,7 @@ import { useApp } from "./appContext.jsx";
 import { signOut } from "./api.js";
 import { prettyTime } from "./format.js";
 import { useTheme } from "./theme.js";
-import { Brand, OverviewIcon, HotspotIcon, RegionsIcon, StoreIcon, SummaryIcon, ForecastIcon, DataIcon, RefreshIcon, SunIcon, MoonIcon, SignOutIcon, MenuIcon, InfoIcon, AlertIcon } from "./components/Icons.jsx";
+import { Brand, OverviewIcon, HotspotIcon, RegionsIcon, StoreIcon, SummaryIcon, ForecastIcon, DataIcon, RefreshIcon, SunIcon, MoonIcon, SignOutIcon, MenuIcon, InfoIcon, AlertIcon, TrendIcon, ReportIcon } from "./components/Icons.jsx";
 import Login from "./pages/Login.jsx";
 import Overview from "./pages/Overview.jsx";
 import Hotspots from "./pages/Hotspots.jsx";
@@ -15,6 +15,8 @@ import StoreView from "./pages/StoreView.jsx";
 import DailySummary from "./pages/DailySummary.jsx";
 import ForecastForm from "./pages/ForecastForm.jsx";
 import DataRefresh from "./pages/DataRefresh.jsx";
+import Trends from "./pages/Trends.jsx";
+import Reports from "./pages/Reports.jsx";
 
 const ROLE_LABEL = { executive: "Company-wide access", region: "Region access", area: "Area access", store: "Store access" };
 
@@ -54,8 +56,10 @@ export default function App() {
     ...(wide ? [{ to: "/regions", label: "Regions and areas", icon: RegionsIcon }] : []),
     ...(user.role === "area" ? [{ to: `/areas/${user.scope_id}`, label: "My area", icon: RegionsIcon }] : []),
     ...(user.role === "store" ? [{ to: `/stores/${user.scope_id}`, label: "My restaurant", icon: StoreIcon }] : []),
+    ...(wide ? [{ to: "/trends", label: "Trends", icon: TrendIcon }] : []),
     { to: "/summary", label: "Daily summary", icon: SummaryIcon },
     { to: "/forecast", label: "Weekly forecast form", icon: ForecastIcon },
+    { to: "/reports", label: "Reports and exports", icon: ReportIcon, group: "Share" },
     { to: "/data", label: "Data and refresh", icon: DataIcon, group: "Setup" },
   ];
   const stale = Boolean(meta.freshness?.stale);
@@ -141,6 +145,8 @@ export default function App() {
             <Route path="/regions/:id" element={<RegionView />} />
             <Route path="/areas/:id" element={<AreaView />} />
             <Route path="/stores/:id" element={<StoreView />} />
+            <Route path="/trends" element={wide ? <Trends /> : <Navigate to={homePath(user)} replace />} />
+            <Route path="/reports" element={<Reports />} />
             <Route path="/summary" element={<DailySummary />} />
             <Route path="/forecast" element={<ForecastForm />} />
             <Route path="/data" element={<DataRefresh />} />
