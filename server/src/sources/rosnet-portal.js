@@ -238,7 +238,7 @@ async function syncPeriod(cfg, token, date, map, { live }) {
   const cost = await gateway(cfg, token, "Cost", svc("LaborCostByLocation/widget"), laborFilter(period));
   for (const c of cost.data || []) { const r = at(c.locationNumber); if (r) r.actual_labor_cost = num(c.laborAmout); }
 
-  const dayparts = await daypartRows(cfg, token, date, map, period).catch(() => []);
+  const dayparts = await daypartRows(cfg, token, date, map, period, rows).catch(() => []);
 
   let saved = 0;
   transaction(() => {
@@ -256,12 +256,18 @@ async function syncPeriod(cfg, token, date, map, { live }) {
 const DAYPART_MAP = { "1-Breakfast": "breakfast", "2-Lunch": "lunch", "3-Carryover": "lunch", "4-Dinner": "dinner", "5-Late Night": "late_night", "6-Overnight": "late_night" };
 
 /**
- * Per-store sales for each daypart. Actual is per store (SalesByLocationDaypart); forecast and
- * last year are only reported at company level, so they are allocated to each store by its share
- * of that daypart's actual — which sums back to the exact company figure, so the company daypart
- * card reads correctly while each store gets a sensible split.
+ * Per-store sales for each daypart. Actual is genuinely per store (SalesByLocationDaypart).
+ * Rosnet reports the daypart FORECAST and LAST-YEAR figures at company level only, never per
+ * store, so they are apportioned to each store by that store's share of its full-day forecast
+ * (and full-day last year) — a real, independent quantity. Two consequences matter:
+ *   1. the apportioned figures still sum back to the exact company daypart total, so the
+ *      company daypart card stays correct to the dollar;
+ *   2. a store's daypart variance is a real signal — it shows whether the store over- or
+ *      under-indexes on that daypart relative to its overall forecast size.
+ * The earlier version apportioned by each store's share of the SAME daypart's actual, which
+ * forced every store's daypart "forecast" to equal its actual and its variance to ~0%.
  */
-async function daypartRows(cfg, token, date, map, period) {
+async function daypartRows(cfg, token, date, map, period, storeTotals) {
   const perStore = await gateway(cfg, token, "DaypartSales", svc("SalesByLocationDaypart/widget"), filter(period));
   const avf = await gateway(cfg, token, "AvFDaypart", svc("ActualVsForecastSalesByDaypart/widget"), filter(period));
   const comp = await gateway(cfg, token, "CompDaypart", svc("CompSalesByDaypart/widget"), filter(period, { compPeriod: "comp" })).catch(() => ({}));
@@ -278,26 +284,44 @@ async function daypartRows(cfg, token, date, map, period) {
 
   // Per store, per dashboard daypart: actual.
   const perStoreActual = new Map(); // rid -> { dp: actual }
-  const companyActual = {};
   for (const r of perStore.data || []) {
     const rid = map.get(Number(r.LocationNumber ?? r.locationNumber));
     if (!rid) continue;
     const byDp = perStoreActual.get(rid) || {};
     for (const [rl, dp] of Object.entries(DAYPART_MAP)) {
       const v = num(r[rl]);
-      if (v !== null) { byDp[dp] = (byDp[dp] || 0) + v; companyActual[dp] = (companyActual[dp] || 0) + v; }
+      if (v !== null) byDp[dp] = (byDp[dp] || 0) + v;
     }
     perStoreActual.set(rid, byDp);
   }
 
+  // Apportionment weights: a store's full-day forecast for the forecast split, its full-day
+  // last year for the last-year split. Fall back to full-day actual, then its daypart actual,
+  // so a store missing one figure still gets a sensible, non-zero weight.
+  const weight = (rid, dpActual, kind) => {
+    const t = storeTotals.get(rid) || {};
+    const w = kind === "forecast" ? t.forecast_sales : t.prior_year_sales;
+    return num(w) ?? num(t.actual_sales) ?? dpActual ?? 0;
+  };
+  // Denominator per daypart: the weights only of the stores that actually have that daypart,
+  // so each daypart's apportioned figures sum to exactly the company daypart total.
+  const denom = (dp, kind) => {
+    let sum = 0;
+    for (const [rid, byDp] of perStoreActual) if (byDp[dp] !== undefined) sum += weight(rid, byDp[dp], kind);
+    return sum;
+  };
+  const denomF = {}; const denomP = {};
+  for (const dp of new Set([...perStoreActual.values()].flatMap((b) => Object.keys(b)))) { denomF[dp] = denom(dp, "forecast"); denomP[dp] = denom(dp, "prior"); }
+
   const out = [];
   for (const [rid, byDp] of perStoreActual) {
     for (const [dp, actual] of Object.entries(byDp)) {
-      const share = companyActual[dp] ? actual / companyActual[dp] : 0;
+      const fShare = denomF[dp] ? weight(rid, actual, "forecast") / denomF[dp] : 0;
+      const pShare = denomP[dp] ? weight(rid, actual, "prior") / denomP[dp] : 0;
       out.push({
         date, restaurant_id: rid, daypart: dp, actual_sales: actual,
-        forecast_sales: compForecast[dp] !== undefined ? compForecast[dp] * share : null,
-        prior_year_sales: compLastYear[dp] !== undefined ? compLastYear[dp] * share : null,
+        forecast_sales: compForecast[dp] !== undefined ? compForecast[dp] * fShare : null,
+        prior_year_sales: compLastYear[dp] !== undefined ? compLastYear[dp] * pShare : null,
       });
     }
   }

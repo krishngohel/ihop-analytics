@@ -55,6 +55,18 @@ const server = http.createServer((req, res) => {
     if (label === "Cost") return json({ data: [
       { locationNumber: 1404, laborAmout: 1780.5 }, { locationNumber: 1413, laborAmout: 1300 },
     ] });
+    // Daypart widgets. Per-store actual is real; forecast and last year are company-level only.
+    if (label === "DaypartSales") return json({ headings: [], data: [
+      { LocationNumber: 1404, LocationName: "Garland", "1-Breakfast": 4000, "2-Lunch": 2000, "4-Dinner": 1000, "5-Late Night": 1000 },
+      { LocationNumber: 1413, LocationName: "Plano", "1-Breakfast": 2000, "2-Lunch": 1500, "4-Dinner": 1000, "5-Late Night": 1000 },
+    ] });
+    if (label === "AvFDaypart") return json({ labels: ["1-Breakfast", "2-Lunch", "3-Carryover", "4-Dinner", "5-Late Night", "6-Overnight"], datasets: [
+      { label: "Actual Sales", data: [6000, 3500, 0, 2000, 2000, 0] },
+      { label: "Forecast Sales", data: [6000, 3200, 0, 2200, 2200, 0] },
+    ] });
+    if (label === "CompDaypart") return json({ labels: ["1-Breakfast", "2-Lunch", "3-Carryover", "4-Dinner", "5-Late Night", "6-Overnight"], datasets: [
+      { label: "Comp Sales By Daypart", data: [5500, 3000, 0, 2000, 2100, 0] },
+    ] });
     if (label === "ByDate") {
       const d = new Date(); d.setDate(d.getDate() - 2);
       const col = `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}/${d.getFullYear()}`;
@@ -113,6 +125,20 @@ test("signs in to the portal and pulls sales, forecast, last year and labor by s
   assert.equal(db.prepare("SELECT is_final FROM daily_performance WHERE date = ? LIMIT 1").get(today()).is_final, 0, "today is live");
   const seeded = db.prepare("SELECT actual_sales FROM daily_performance p JOIN restaurant r USING (restaurant_id) WHERE r.store_number = '1404' AND date = ?").get(addDays(today(), -2));
   assert.equal(seeded?.actual_sales, 7800, "the by-date report seeded history");
+
+  // Daypart forecast/last-year are reported company-wide only; apportion them to stores by
+  // each store's full-day forecast (Garland 8200, Plano 5400) so the company total stays exact
+  // and the per-store variance is a real signal — not the ~0% the old actual-share split gave.
+  const bfG = db.prepare("SELECT * FROM daily_performance WHERE restaurant_id = (SELECT restaurant_id FROM restaurant WHERE store_number='1404') AND date = ? AND daypart='breakfast'").get(yesterday());
+  const bfP = db.prepare("SELECT * FROM daily_performance WHERE restaurant_id = (SELECT restaurant_id FROM restaurant WHERE store_number='1413') AND date = ? AND daypart='breakfast'").get(yesterday());
+  assert.equal(bfG.actual_sales, 4000);
+  assert.equal(bfP.actual_sales, 2000);
+  // Company breakfast forecast (6000) is preserved: 6000*8200/13600 + 6000*5400/13600 = 6000.
+  assert.ok(Math.abs((bfG.forecast_sales + bfP.forecast_sales) - 6000) < 0.5, `breakfast forecast sums to company 6000, got ${bfG.forecast_sales + bfP.forecast_sales}`);
+  assert.ok(Math.abs(bfG.forecast_sales - 3617.65) < 1, `Garland breakfast forecast ~3617.65, got ${bfG.forecast_sales}`);
+  assert.notEqual(Math.round(bfG.forecast_sales), Math.round(bfG.actual_sales), "forecast is not just a copy of actual (the old degenerate behavior)");
+  // Company last-year (5500) preserved the same way.
+  assert.ok(Math.abs((bfG.prior_year_sales + bfP.prior_year_sales) - 5500) < 0.5, "breakfast last-year sums to company 5500");
 
   // With no client id supplied, it resolves from the token's ACLs (validate-token) instead of 403ing.
   delete process.env.ROSNET_PORTAL_CLIENT_ID;

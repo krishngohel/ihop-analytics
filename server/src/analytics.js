@@ -2,7 +2,7 @@
 // from summed dollars and hours, never averaged, so a rollup matches its parts.
 import db from "./db.js";
 import { pct } from "./performance.js";
-import { addDays } from "./dates.js";
+import { addDays, daysBetween } from "./dates.js";
 
 /** WHERE fragment (on restaurant alias r) limiting rows to what a user may see, plus optional filters. */
 export function restaurantFilter(user, { regionId, areaId, restaurantId } = {}) {
@@ -150,6 +150,24 @@ export function hierarchy(user) {
     region.areas.get(r.area_id).restaurants.push({ restaurant_id: r.restaurant_id, restaurant_name: r.restaurant_name, city: r.city, state: r.state });
   }
   return [...regions.values()].map((g) => ({ ...g, areas: [...g.areas.values()] }));
+}
+
+/**
+ * How much of a range's sales the daypart breakdown actually covers. The portal seeds several
+ * days of history as sales-only (no daypart split), so a multi-day daypart card can cover only
+ * part of the range; the UI uses this to say so instead of quietly understating each daypart.
+ */
+export function daypartCoverage(user, { from, to, daypart = "all", filters = {} }) {
+  const f = restaurantFilter(user, filters);
+  const rangeSales = db.prepare(`SELECT SUM(p.actual_sales) AS s FROM daily_performance p ${JOINS}
+    WHERE p.daypart = 'all' AND p.date BETWEEN ? AND ?${f.sql}`).get(from, to, ...f.params).s || 0;
+  // All-day sales on the dates that actually have a daypart breakdown on file.
+  const coveredSales = db.prepare(`SELECT SUM(p.actual_sales) AS s FROM daily_performance p ${JOINS}
+    WHERE p.daypart = 'all'${f.sql} AND p.date IN (SELECT DISTINCT date FROM daily_performance WHERE daypart != 'all' AND date BETWEEN ? AND ?)
+    AND p.date BETWEEN ? AND ?`).get(...f.params, from, to, from, to).s || 0;
+  const days = db.prepare("SELECT COUNT(DISTINCT date) AS n FROM daily_performance WHERE daypart != 'all' AND date BETWEEN ? AND ?").get(from, to).n;
+  const rangeDays = daysBetween(from, to) + 1;
+  return { coveredSales, rangeSales, days, rangeDays, partial: rangeSales > 0 && coveredSales < rangeSales * 0.995 };
 }
 
 export function dataBounds() {

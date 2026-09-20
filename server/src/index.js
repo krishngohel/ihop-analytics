@@ -6,7 +6,7 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import db, { DAYPARTS, DAYPART_LABELS, allSettings, setSetting, audit } from "./db.js";
 import { attachUser, requireAuth, requireRole, login, logout, publicUser, canAccess, createUser, generatePassword, OPEN_ACCESS } from "./auth.js";
-import { metrics, companyTotals, dailySeries, weatherSummary, hierarchy, dataBounds } from "./analytics.js";
+import { metrics, companyTotals, dailySeries, weatherSummary, hierarchy, dataBounds, daypartCoverage } from "./analytics.js";
 import { evaluateHotspots, hotspotsByCategory, hotspotCounts, CATEGORIES, UNUSUAL_DROP_PCT, CRITICAL_SALES_PCT, CRITICAL_LABOR_PCT } from "./hotspots.js";
 import { buildDailySummary, storedDailySummary } from "./summary.js";
 import { forecastForm, forecastRollup, saveForecast, nextWeekStart } from "./forecast.js";
@@ -130,6 +130,7 @@ app.get("/api/overview", (req, res) => {
     breakdown: withHotspotCounts(metrics(req.user, { from, to, daypart, groupBy: level, filters }), hotspotCounts(hs, level === "region" ? "region_id" : level === "area" ? "area_id" : "id"))
       .sort((a, b) => (a.sales_variance_pct ?? 0) - (b.sales_variance_pct ?? 0)),
     dayparts: DAYPARTS.map((dp) => ({ daypart: dp, label: DAYPART_LABELS[dp], ...(companyTotals(req.user, { from, to, daypart: dp, filters }) || {}) })),
+    daypartCoverage: daypartCoverage(req.user, { from, to, filters }),
     weather: { current: weatherSummary(req.user, to, filters), lastYear: weatherSummary(req.user, comparableLastYear(to), filters) },
     hotspots: { count: hs.hotspots.length, restaurants: hs.restaurants, share: hs.share, critical: hs.hotspots.filter((h) => h.severity === "critical").length, top: hs.hotspots.slice(0, 6), positives: hs.positives.slice(0, 4) },
   });
@@ -233,6 +234,7 @@ app.get("/api/stores/:id", (req, res) => {
     areaAverage: (() => { const a = companyTotals(req.user, { from, to, daypart, filters: { areaId: restaurant.area_id } }); return a ? { sales_variance_pct: a.sales_variance_pct, labor_variance_pct: a.labor_variance_pct, prior_year_variance_pct: a.prior_year_variance_pct, average_rating: a.average_rating } : null; })(),
     daily, weekly, periods,
     dayparts: DAYPARTS.map((dp) => ({ daypart: dp, label: DAYPART_LABELS[dp], ...(companyTotals(req.user, { from, to, daypart: dp, filters }) || {}) })),
+    daypartCoverage: daypartCoverage(req.user, { from, to, filters }),
     anomalies: anomalies.reverse(),
     latestStatus: hsDay ? { severity: hsDay.severity, flags: hsDay.flags, weather_note: hsDay.weather_note, date: lastFinal } : null,
   });

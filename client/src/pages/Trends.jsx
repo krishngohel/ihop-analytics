@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useApp, useData } from "../appContext.jsx";
 import { getTrends, excelExportUrl } from "../api.js";
 import RangeBar from "../components/RangeBar.jsx";
-import { ScoreTile, Delta, Loading } from "../components/Bits.jsx";
+import { ScoreTile, Delta, Loading, DaypartNote } from "../components/Bits.jsx";
 import { SalesTrend, LaborTrend, WeeklyBars, VarianceTrend, WeekdayBars, DaypartStack, GroupLines, MetricTrend, SERIES } from "../components/Charts.jsx";
 import { DownloadIcon, ReportIcon } from "../components/Icons.jsx";
 import { fmt$, fmtNum, fmtHours, fmtRating, prettyDay } from "../format.js";
@@ -151,6 +151,7 @@ export default function Trends() {
             <thead><tr><th>Daypart</th><th className="num">Sales</th><th className="num">vs. forecast</th><th className="num">vs. last year</th></tr></thead>
             <tbody>{t.dayparts.map((d) => <tr key={d.daypart}><td>{d.label}</td><td className="num money">{fmt$(d.actual_sales)}</td><td className="num"><Delta value={d.sales_variance_pct} /></td><td className="num"><Delta value={d.prior_year_variance_pct} /></td></tr>)}</tbody>
           </table>
+          <DaypartNote cov={t.daypartCoverage} />
         </div>
       </div>
 

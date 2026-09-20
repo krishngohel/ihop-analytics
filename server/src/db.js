@@ -219,6 +219,16 @@ const DEFAULT_SETTINGS = {
 const insertSetting = db.prepare("INSERT OR IGNORE INTO setting (key, value) VALUES (?, ?)");
 for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) insertSetting.run(k, v);
 
+// Repair: an earlier build passed Open-Meteo the wrong country parameter and geocoded a few
+// stores to the wrong country (Georgetown -> Guyana, Zaragoza -> Spain). Clear any point that
+// falls outside the US bounding box and drop its weather so the next refresh re-geocodes it
+// correctly (or leaves it without weather, which is only ever shown as context).
+const outOfUS = db.prepare("SELECT restaurant_id FROM restaurant WHERE latitude IS NOT NULL AND (latitude < 17.5 OR latitude > 71.6 OR longitude < -179.5 OR longitude > -64.5)").all();
+for (const r of outOfUS) {
+  db.prepare("DELETE FROM weather WHERE restaurant_id = ?").run(r.restaurant_id);
+  db.prepare("UPDATE restaurant SET latitude = NULL, longitude = NULL, timezone = 'America/Chicago' WHERE restaurant_id = ?").run(r.restaurant_id);
+}
+
 export function getSetting(key) {
   return db.prepare("SELECT value FROM setting WHERE key = ?").get(key)?.value ?? DEFAULT_SETTINGS[key] ?? null;
 }

@@ -5,7 +5,7 @@ import RangeBar from "../components/RangeBar.jsx";
 import PerfTable from "../components/PerfTable.jsx";
 import HotspotCard from "../components/HotspotCard.jsx";
 import { SalesTrend, VarianceBars } from "../components/Charts.jsx";
-import { Snapshot, StatusPill, ScoreTile, Delta, Loading } from "../components/Bits.jsx";
+import { Snapshot, StatusPill, ScoreTile, Delta, Loading, DaypartNote } from "../components/Bits.jsx";
 import { fmt$, fmtPct, fmtNum, fmtRating, fmtHoursSigned, fmtTemp, fmtHours, prettyDay } from "../format.js";
 
 // One glance: is the company fine, worth watching, or on fire? Criticals or a real miss
@@ -144,6 +144,7 @@ export default function Overview() {
               ))}
             </tbody>
           </table>
+          <DaypartNote cov={o.daypartCoverage} />
         </div>
         <WeatherSummary w={o.weather} />
       </div>

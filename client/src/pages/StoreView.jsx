@@ -4,7 +4,7 @@ import { useApp, useData } from "../appContext.jsx";
 import { getStore } from "../api.js";
 import RangeBar from "../components/RangeBar.jsx";
 import { SalesTrend, LaborTrend } from "../components/Charts.jsx";
-import { Snapshot, PerformanceStrip, Crumbs, Loading, Delta, SeverityBadge, WeatherLine } from "../components/Bits.jsx";
+import { Snapshot, PerformanceStrip, Crumbs, Loading, Delta, SeverityBadge, WeatherLine, DaypartNote } from "../components/Bits.jsx";
 import { fmt$, fmtHours, fmtNum, fmtRating, fmtTemp, prettyDay, laborTone, fmtHoursSigned } from "../format.js";
 
 const VIEWS = [{ key: "daily", label: "Daily" }, { key: "weekly", label: "Weekly" }, { key: "periods", label: "By period" }];
@@ -139,6 +139,7 @@ export default function StoreView() {
             ))}
           </tbody>
         </table>
+        <DaypartNote cov={s.daypartCoverage} />
       </div>
     </div>
   );

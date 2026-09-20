@@ -183,3 +183,20 @@ export function WeatherLine({ label, w, single = true }) {
     </div>
   );
 }
+
+/**
+ * A note under a daypart breakdown when the days on file don't cover the whole range. The
+ * portal seeds older history as daily totals only, so a multi-day daypart card can show less
+ * than the range's full sales; saying so keeps the smaller daypart figures from misleading.
+ */
+export function DaypartNote({ cov }) {
+  if (!cov || !cov.partial) return null;
+  const pct = cov.rangeSales ? Math.round((cov.coveredSales / cov.rangeSales) * 100) : 0;
+  return (
+    <p className="empty-note" style={{ marginTop: 10 }}>
+      Dayparts are on file for {cov.days} of {cov.rangeDays} days in this range ({pct}% of sales). Older days were
+      imported as daily totals only, so each daypart above is less than the range's full sales. Pick a single recent
+      day, or a range within the last few days, to see a complete daypart split.
+    </p>
+  );
+}

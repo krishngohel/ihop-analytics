@@ -16,20 +16,33 @@ import { storeDailySummary, storedDailySummary } from "./summary.js";
 let running = null;
 let lastWeatherAt = 0;
 
+// A geocoded point must land inside the United States (including Alaska, Hawaii and the
+// territories). Anything outside is a wrong-country match and is rejected — weather from the
+// wrong place is worse than no weather, which is only ever shown as context.
+function inUnitedStates(hit) {
+  if (hit.country_code && hit.country_code !== "US") return false;
+  if (hit.country && !/united states/i.test(hit.country)) return false;
+  const { latitude: lat, longitude: lon } = hit;
+  return lat >= 17.5 && lat <= 71.6 && lon >= -179.5 && lon <= -64.5;
+}
+
 async function geocodeMissing() {
   const missing = db.prepare("SELECT restaurant_id, city, state FROM restaurant WHERE (latitude IS NULL OR longitude IS NULL) AND city IS NOT NULL LIMIT 40").all();
-  let found = 0;
+  let found = 0; let rejected = 0;
   for (const r of missing) {
-    const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(r.city)}&count=10&country=US&language=en`, { signal: AbortSignal.timeout(15000) });
+    // Open-Meteo's country filter is `countryCode`, not `country`; with the wrong name it
+    // returns global matches (Georgetown -> Guyana, Zaragoza -> Spain). Filter to the US here
+    // as well, and never save a point outside the US bounding box.
+    const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(r.city)}&count=10&countryCode=US&language=en`, { signal: AbortSignal.timeout(15000) });
     if (!res.ok) continue;
-    const hits = (await res.json()).results || [];
+    const hits = ((await res.json()).results || []).filter(inUnitedStates);
     const hit = hits.find((h) => !r.state || [h.admin1, h.admin1_code].some((a) => a && (a.toLowerCase() === String(r.state).toLowerCase() || STATE_NAMES[String(r.state).toUpperCase()] === a))) || (r.state ? null : hits[0]);
     if (hit) {
       db.prepare("UPDATE restaurant SET latitude = ?, longitude = ?, timezone = COALESCE(?, timezone) WHERE restaurant_id = ?").run(hit.latitude, hit.longitude, hit.timezone || null, r.restaurant_id);
       found++;
-    }
+    } else if (!hits.length) rejected++;
   }
-  return { missing: missing.length, found };
+  return { missing: missing.length, found, no_us_match: rejected };
 }
 const STATE_NAMES = { AL: "Alabama", AR: "Arkansas", AZ: "Arizona", CA: "California", CO: "Colorado", FL: "Florida", GA: "Georgia", KS: "Kansas", KY: "Kentucky", LA: "Louisiana", MO: "Missouri", MS: "Mississippi", NC: "North Carolina", NM: "New Mexico", NV: "Nevada", OK: "Oklahoma", SC: "South Carolina", TN: "Tennessee", TX: "Texas", VA: "Virginia" };
 
