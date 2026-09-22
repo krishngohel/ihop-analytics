@@ -33,3 +33,10 @@ export const prettyTime = (iso) => (iso ? new Date(iso).toLocaleString("en-US", 
 // For sales, above zero is good. For labor, above allowable is bad.
 export const salesTone = (n) => (n === null || n === undefined ? "neutral" : Number(n) >= 0 ? "positive" : "negative");
 export const laborTone = (n) => (n === null || n === undefined ? "neutral" : Number(n) <= 0 ? "positive" : "negative");
+
+// Partial forecast coverage: the range's total sales span more days than its forecast does
+// (older history is sales-only). When true, showing total sales next to the partial forecast
+// misleads, so the UI shows the covered sales in the comparison and says so.
+export const partialForecast = (t) =>
+  Boolean(t && t.forecast_covered_sales != null && t.actual_sales != null &&
+    (t.actual_sales - t.forecast_covered_sales) > Math.max(1, t.actual_sales * 0.005));

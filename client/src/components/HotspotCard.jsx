@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { SeverityBadge, Delta, WeatherLine } from "./Bits.jsx";
-import { fmt$, fmt$signed, fmtHours, fmtHoursSigned, fmtNum, fmtRating, salesTone, laborTone } from "../format.js";
+import { fmt$, fmt$signed, fmtHours, fmtHoursSigned, fmtNum, fmtRating, salesTone, laborTone, partialForecast } from "../format.js";
 
 function Row({ label, children }) {
   return <div className="hs-row"><span>{label}</span><span className="money">{children}</span></div>;
@@ -30,9 +30,11 @@ export default function HotspotCard({ s, single = true, compact = false }) {
           <section>
             <h4>Sales</h4>
             <Row label="Actual">{fmt$(s.actual_sales)}</Row>
-            <Row label="Forecast">{fmt$(s.forecast_basis)}</Row>
+            {partialForecast(s)
+              ? <Row label="On days w/ forecast">{fmt$(s.forecast_covered_sales)} vs {fmt$(s.forecast_basis)}</Row>
+              : <Row label="Forecast">{fmt$(s.forecast_basis)}</Row>}
             <Row label="Last year">{fmt$(s.prior_year_sales)}</Row>
-            <Row label="vs. forecast"><span className={salesTone(s.sales_variance)}>{fmt$signed(s.sales_variance)}</span> <Delta value={s.sales_variance_pct} /></Row>
+            <Row label={partialForecast(s) ? "vs. forecast (those days)" : "vs. forecast"}><span className={salesTone(s.sales_variance)}>{fmt$signed(s.sales_variance)}</span> <Delta value={s.sales_variance_pct} /></Row>
             <Row label="vs. last year"><span className={salesTone(s.prior_year_variance)}>{fmt$signed(s.prior_year_variance)}</span> <Delta value={s.prior_year_variance_pct} /></Row>
           </section>
           <section>

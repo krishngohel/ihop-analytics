@@ -2,7 +2,7 @@
 // dashboard uses, regrouped by week, by weekday, by daypart and by region / area / store so
 // a pattern shows up that a single day's table would hide.
 import db, { DAYPARTS, DAYPART_LABELS } from "./db.js";
-import { metrics, companyTotals, dailySeries, restaurantFilter, daypartCoverage } from "./analytics.js";
+import { metrics, companyTotals, dailySeries, restaurantFilter, daypartCoverage, forecastCoverage } from "./analytics.js";
 import { pct } from "./performance.js";
 import { addDays, dayOfWeek, weekStart } from "./dates.js";
 
@@ -127,6 +127,7 @@ export function trendsData(user, { from, to, daypart = "all", filters = {} }) {
     weekday: weekdayPattern(daily),
     dayparts: DAYPARTS.map((dp) => ({ daypart: dp, label: DAYPART_LABELS[dp], ...(companyTotals(user, { from, to, daypart: dp, filters }) || {}) })),
     daypartCoverage: daypartCoverage(user, { from, to, filters }),
+    forecastCoverage: forecastCoverage(user, { from, to, filters }),
     daypartByDay: daypartByDay(user, { from, to, filters }),
     groups: groupsByDay(user, { from, to, daypart, filters }),
     breakdown: metrics(user, { from, to, daypart, groupBy: level, filters }).sort((a, b) => (a.sales_variance_pct ?? 0) - (b.sales_variance_pct ?? 0)),

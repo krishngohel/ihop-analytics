@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { AlertIcon, EyeIcon, CheckIcon, StarIcon } from "./Icons.jsx";
-import { fmt$, fmt$signed, fmtPct, fmtHours, fmtHoursSigned, fmtNum, fmtRating, fmtTemp, salesTone, laborTone } from "../format.js";
+import { fmt$, fmt$signed, fmtPct, fmtHours, fmtHoursSigned, fmtNum, fmtRating, fmtTemp, salesTone, laborTone, partialForecast } from "../format.js";
 
 export const SEVERITY = {
   critical: { label: "Critical", tone: "attention", icon: AlertIcon },
@@ -59,6 +59,44 @@ export function ScoreTile({ label, value, delta, deltaKind = "sales", deltaLabel
 }
 
 /**
+ * The sales scorecard tile, coverage-aware. When the range's forecast covers fewer days than
+ * its sales (older history is sales-only), the big number stays the true total, but the
+ * comparison line shows the covered sales against the forecast so the two reconcile, and the
+ * delta says it covers only the recent days — instead of a huge total sitting next to a small
+ * forecast and a tiny percentage, which reads as broken.
+ */
+export function SalesTile({ t, live = false, to, label }) {
+  const partial = partialForecast(t) && !live;
+  const hasForecast = t.forecast_basis !== null && t.forecast_basis !== undefined;
+  return (
+    <ScoreTile
+      to={to}
+      label={label || (live ? "Sales so far" : "Sales")}
+      value={fmt$(t.actual_sales)}
+      delta={t.sales_variance_pct}
+      deltaLabel={partial ? "vs. forecast, recent days" : "vs. forecast"}
+      sub={partial ? `${fmt$(t.forecast_covered_sales)} vs. ${fmt$(t.forecast_basis)} forecast on those days`
+        : hasForecast ? `Forecast ${fmt$(t.forecast_basis)}` : "No forecast on file"}
+    />
+  );
+}
+
+/**
+ * A one-line note for a range whose forecast covers only its most recent days. Placed near any
+ * sales-vs-forecast block so the total-vs-partial-forecast gap never reads as a mistake.
+ */
+export function CoverageNote({ cov, className = "empty-note" }) {
+  if (!cov || !cov.partial) return null;
+  return (
+    <p className={className} style={{ marginTop: 10 }}>
+      Sales vs. forecast covers the {cov.forecastDays} most recent day{cov.forecastDays === 1 ? "" : "s"} — {fmt$(cov.coveredSales)} of
+      the range's {fmt$(cov.totalSales)} in sales. Earlier days were imported as daily sales totals only, with no forecast to compare, so
+      the percentage reflects only the days that have a forecast. It fills in as each new day syncs in full.
+    </p>
+  );
+}
+
+/**
  * A variance percentage with a small bar either side of a zero line, scaled to `max`
  * (the largest variance in the table) so rows can be compared at a glance.
  */
@@ -105,14 +143,17 @@ function Stat({ label, value, lines = [] }) {
 /** The standard company / region / area / store KPI strip: sales, labor, guest. */
 export function PerformanceStrip({ t, live = false, extra = null }) {
   if (!t || t.actual_sales === undefined || t.actual_sales === null) return <p className="muted">No results on file for this selection.</p>;
+  const partial = partialForecast(t) && !live;
   return (
     <div className="kpis">
       <Stat label={live ? "Sales so far" : "Actual sales"} value={fmt$(t.actual_sales)} lines={[
-        <span key="f" className="neutral">{live ? "Forecast to this point" : "Forecast"} {fmt$(t.forecast_basis)}</span>,
+        partial
+          ? <span key="f" className="neutral">{fmt$(t.forecast_covered_sales)} on the days with a forecast (of {fmt$(t.actual_sales)})</span>
+          : <span key="f" className="neutral">{live ? "Forecast to this point" : "Forecast"} {fmt$(t.forecast_basis)}</span>,
         live && <span key="d" className="neutral">Full-day forecast {fmt$(t.forecast_sales)}</span>,
       ]} />
       <Stat label="Sales variance" value={<span className={salesTone(t.sales_variance)}>{fmt$signed(t.sales_variance)}</span>} lines={[
-        <span key="p"><Delta value={t.sales_variance_pct} /> <span className="neutral">vs. forecast</span></span>,
+        <span key="p"><Delta value={t.sales_variance_pct} /> <span className="neutral">vs. forecast{partial ? " (recent days)" : ""}</span></span>,
         !live && <span key="ly"><Delta value={t.prior_year_variance_pct} /> <span className="neutral">vs. last year ({fmt$(t.prior_year_sales)})</span></span>,
       ]} />
       <Stat label="Actual labor" value={fmtHours(t.actual_labor_hours)} lines={[
@@ -160,7 +201,7 @@ export function Snapshot({ title, caption, t, live = false, detailed = false, to
         </div>
       )}
       <dl>
-        <div><dt>{live ? "vs. forecast so far" : "vs. forecast"}</dt><dd><Delta value={t.sales_variance_pct} />{detailed && t.forecast_basis !== null && t.forecast_basis !== undefined && <> <span className="neutral money">({fmt$(t.forecast_basis)})</span></>}</dd></div>
+        <div><dt>{live ? "vs. forecast so far" : partialForecast(t) ? "vs. forecast (recent days)" : "vs. forecast"}</dt><dd><Delta value={t.sales_variance_pct} />{detailed && t.forecast_basis !== null && t.forecast_basis !== undefined && <> <span className="neutral money">({fmt$(partialForecast(t) ? t.forecast_covered_sales : t.actual_sales)} vs {fmt$(t.forecast_basis)})</span></>}</dd></div>
         {!live && <div><dt>vs. last year</dt><dd><Delta value={t.prior_year_variance_pct} /></dd></div>}
         <div><dt>Labor vs. allowable</dt><dd><Delta value={t.labor_variance_pct} kind="labor" />{detailed && t.labor_variance !== null && t.labor_variance !== undefined && <> <span className={`money ${laborTone(t.labor_variance)}`}>({fmtHoursSigned(t.labor_variance)})</span></>}</dd></div>
         {detailed && !live && <div><dt>Guest rating</dt><dd className="money">{fmtRating(t.average_rating)} <span className="neutral">({fmtNum(t.survey_count)} surveys)</span></dd></div>}

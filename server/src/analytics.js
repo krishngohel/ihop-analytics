@@ -153,6 +153,28 @@ export function hierarchy(user) {
 }
 
 /**
+ * How much of a range's sales has a forecast on file. The portal seeds older history as
+ * sales-only (no forecast), so on a multi-day range the total sales can span more days than
+ * the forecast. Every "sales vs. forecast" figure compares only the covered days (see
+ * `derive`), so the UI needs this to show the covered sales alongside the forecast — otherwise
+ * a reader sees the full total next to a partial forecast and a small variance, which reads as
+ * broken math. coveredSales is the actual on the days that have a forecast; totalSales is all of it.
+ */
+export function forecastCoverage(user, { from, to, filters = {} }) {
+  const f = restaurantFilter(user, filters);
+  const row = db.prepare(`
+    SELECT SUM(p.actual_sales) AS totalSales,
+      SUM(CASE WHEN (CASE WHEN p.is_final = 0 THEN p.forecast_to_now ELSE p.forecast_sales END) IS NOT NULL THEN p.actual_sales END) AS coveredSales,
+      COUNT(DISTINCT p.date) AS salesDays,
+      COUNT(DISTINCT CASE WHEN (CASE WHEN p.is_final = 0 THEN p.forecast_to_now ELSE p.forecast_sales END) IS NOT NULL THEN p.date END) AS forecastDays
+    FROM daily_performance p ${JOINS}
+    WHERE p.daypart = 'all' AND p.actual_sales IS NOT NULL AND p.date BETWEEN ? AND ?${f.sql}`).get(from, to, ...f.params);
+  const totalSales = row.totalSales || 0; const coveredSales = row.coveredSales || 0;
+  return { totalSales, coveredSales, salesDays: row.salesDays || 0, forecastDays: row.forecastDays || 0,
+    partial: row.forecastDays > 0 && row.salesDays > row.forecastDays && (totalSales - coveredSales) > Math.max(1, totalSales * 0.005) };
+}
+
+/**
  * How much of a range's sales the daypart breakdown actually covers. The portal seeds several
  * days of history as sales-only (no daypart split), so a multi-day daypart card can cover only
  * part of the range; the UI uses this to say so instead of quietly understating each daypart.

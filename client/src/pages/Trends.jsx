@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useApp, useData } from "../appContext.jsx";
 import { getTrends, excelExportUrl } from "../api.js";
 import RangeBar from "../components/RangeBar.jsx";
-import { ScoreTile, Delta, Loading, DaypartNote } from "../components/Bits.jsx";
+import { ScoreTile, SalesTile, CoverageNote, Delta, Loading, DaypartNote } from "../components/Bits.jsx";
 import { SalesTrend, LaborTrend, WeeklyBars, VarianceTrend, WeekdayBars, DaypartStack, GroupLines, MetricTrend, SERIES } from "../components/Charts.jsx";
 import { DownloadIcon, ReportIcon } from "../components/Icons.jsx";
 import { fmt$, fmtNum, fmtHours, fmtRating, prettyDay } from "../format.js";
@@ -62,11 +62,12 @@ export default function Trends() {
           </div>
         </div>
         <div className="scorecard">
-          <ScoreTile label="Sales in range" value={fmt$(tot.actual_sales)} delta={tot.sales_variance_pct} deltaLabel="vs. forecast" sub={has(tot.forecast_basis) ? `Forecast ${fmt$(tot.forecast_basis)}` : "No forecast on file"} />
+          <SalesTile t={tot} label="Sales in range" />
           <ScoreTile label="vs. last year" value={<Delta value={tot.prior_year_variance_pct} />} sub={tot.prior_year_sales ? `Last year ${fmt$(tot.prior_year_sales)}` : "No prior year on file"} />
           <ScoreTile label="Labor vs. allowable" value={fmtHours(tot.actual_labor_hours)} delta={tot.labor_variance_pct} deltaKind="labor" deltaLabel={tot.labor_variance_pct > 0 ? "over" : "under"} sub={has(tot.labor_cost_pct) ? `${tot.labor_cost_pct}% of sales` : "No labor cost on file"} />
           <ScoreTile label="Last full week" value={lastFull ? fmt$(lastFull.actual_sales) : "–"} delta={lastFull?.week_over_week_pct} deltaLabel="week over week" sub={lastFull ? `Week of ${prettyDay(lastFull.week_start)}` : "No full week in range yet"} />
         </div>
+        <CoverageNote cov={t.forecastCoverage} />
       </div>
 
       <div className="card">

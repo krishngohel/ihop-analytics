@@ -53,6 +53,20 @@ test("variances only count the days that have both sides on file", async () => {
   assert.equal(t.labor_cost_pct, 19); // 1600 cost against the 8400 of covered sales
 });
 
+test("forecast coverage reports the partial window so the UI never divides a total by a partial forecast", async () => {
+  const { days } = await seed();
+  const { forecastCoverage } = await import("../src/analytics.js");
+  const partial = forecastCoverage(user, { from: days[0], to: days[9] }); // 10 sales days, 4 forecast days
+  assert.equal(partial.partial, true);
+  assert.equal(partial.salesDays, 10);
+  assert.equal(partial.forecastDays, 4);
+  assert.equal(partial.totalSales, 21000);
+  assert.equal(partial.coveredSales, 8400);
+  // The variance shown must reconcile against the covered sales, not the total: (8400-7200)/7200 = +16.7%.
+  const full = forecastCoverage(user, { from: days[6], to: days[9] }); // only forecasted days
+  assert.equal(full.partial, false); // every day in this window has a forecast
+});
+
 test("weekly and weekday rollups follow the same rule", async () => {
   const { days } = await seed();
   const { trendsData } = await import("../src/trends.js");

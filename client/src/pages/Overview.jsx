@@ -5,7 +5,7 @@ import RangeBar from "../components/RangeBar.jsx";
 import PerfTable from "../components/PerfTable.jsx";
 import HotspotCard from "../components/HotspotCard.jsx";
 import { SalesTrend, VarianceBars } from "../components/Charts.jsx";
-import { Snapshot, StatusPill, ScoreTile, Delta, Loading, DaypartNote } from "../components/Bits.jsx";
+import { Snapshot, StatusPill, ScoreTile, SalesTile, CoverageNote, Delta, Loading, DaypartNote } from "../components/Bits.jsx";
 import { fmt$, fmtPct, fmtNum, fmtRating, fmtHoursSigned, fmtTemp, fmtHours, prettyDay } from "../format.js";
 
 // One glance: is the company fine, worth watching, or on fire? Criticals or a real miss
@@ -72,9 +72,7 @@ export default function Overview() {
           <p className="verdict">{verdict(o, scope)}</p>
         </div>
         <div className="scorecard">
-          <ScoreTile to="/regions" label={live ? "Sales so far" : "Sales"} value={fmt$(t.actual_sales)}
-            delta={t.sales_variance_pct} deltaLabel="vs. forecast"
-            sub={t.forecast_basis !== null && t.forecast_basis !== undefined ? `Forecast ${fmt$(t.forecast_basis)}` : "No forecast on file"} />
+          <SalesTile t={t} live={live} to="/regions" />
           {!live && (
             <ScoreTile to="/regions" label="vs. last year" value={<Delta value={t.prior_year_variance_pct} />}
               sub={t.prior_year_sales ? `Last year ${fmt$(t.prior_year_sales)}` : "No prior year on file"} />
@@ -86,6 +84,7 @@ export default function Overview() {
           <ScoreTile accent to="/hotspots" label="Need attention" value={o.hotspots.count}
             sub={o.hotspots.critical ? `${o.hotspots.critical} critical · of ${o.hotspots.restaurants}` : `of ${o.hotspots.restaurants} restaurants`} />
         </div>
+        <CoverageNote cov={o.forecastCoverage} />
       </div>
 
       <div className="grid three">
@@ -127,6 +126,7 @@ export default function Overview() {
           <summary>Show the numbers for every {childLabel.toLowerCase()}</summary>
           <PerfTable rows={o.breakdown} linkFor={childPath} nameLabel={childLabel}
             subtitleFor={o.breakdownLevel === "area" ? (r) => r.area_manager : null} />
+          <CoverageNote cov={o.forecastCoverage} />
         </details>
       </div>
 

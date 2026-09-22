@@ -4,7 +4,7 @@ import { useApp, useData } from "../appContext.jsx";
 import { getStore } from "../api.js";
 import RangeBar from "../components/RangeBar.jsx";
 import { SalesTrend, LaborTrend } from "../components/Charts.jsx";
-import { Snapshot, PerformanceStrip, Crumbs, Loading, Delta, SeverityBadge, WeatherLine, DaypartNote } from "../components/Bits.jsx";
+import { Snapshot, PerformanceStrip, Crumbs, Loading, Delta, SeverityBadge, WeatherLine, DaypartNote, CoverageNote } from "../components/Bits.jsx";
 import { fmt$, fmtHours, fmtNum, fmtRating, fmtTemp, prettyDay, laborTone, fmtHoursSigned } from "../format.js";
 
 const VIEWS = [{ key: "daily", label: "Daily" }, { key: "weekly", label: "Weekly" }, { key: "periods", label: "By period" }];
@@ -39,6 +39,7 @@ export default function StoreView() {
           <p className="status-line"><strong>{prettyDay(s.latestStatus.date)}:</strong> {s.latestStatus.flags.join(" · ")}{s.latestStatus.weather_note ? ` ${s.latestStatus.weather_note}` : ""}</p>
         )}
         <PerformanceStrip t={s.selected} live={single && range.to === s.today?.date} />
+        <CoverageNote cov={s.forecastCoverage} />
         {s.areaAverage && <p className="muted" style={{ margin: "12px 0 0" }}>{r.area_name} area for the same dates: sales <Delta value={s.areaAverage.sales_variance_pct} /> vs. forecast, labor <Delta value={s.areaAverage.labor_variance_pct} kind="labor" /> vs. allowable, guest rating {fmtRating(s.areaAverage.average_rating)}.</p>}
       </div>
 
@@ -111,7 +112,8 @@ export default function StoreView() {
               <tbody>
                 {[...(view === "weekly" ? s.weekly : s.periods)].reverse().map((w) => (
                   <tr key={w.label}>
-                    <td>{view === "weekly" ? `${prettyDay(w.week_start, { month: "short", day: "numeric" })} to ${prettyDay(w.week_end, { month: "short", day: "numeric" })}` : `${w.label} (${prettyDay(w.from, { month: "short", day: "numeric" })} to ${prettyDay(w.to, { month: "short", day: "numeric" })})`}</td>
+                    <td>{view === "weekly" ? `${prettyDay(w.week_start, { month: "short", day: "numeric" })} to ${prettyDay(w.week_end, { month: "short", day: "numeric" })}` : `${w.label} (${prettyDay(w.from, { month: "short", day: "numeric" })} to ${prettyDay(w.to, { month: "short", day: "numeric" })})`}
+                      {w.forecast_days > 0 && w.forecast_days < w.days && <span className="tag" title={`Forecast on ${w.forecast_days} of ${w.days} days; the variance covers only those days`}>forecast {w.forecast_days}/{w.days}d</span>}</td>
                     <td className="num neutral">{w.days}</td>
                     <td className="num money">{fmt$(w.actual_sales)}</td><td className="num money">{fmt$(w.forecast_sales)}</td><td className="num money">{fmt$(w.prior_year_sales)}</td>
                     <td className="num"><Delta value={w.sales_variance_pct} /></td><td className="num"><Delta value={w.prior_year_variance_pct} /></td>

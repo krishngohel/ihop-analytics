@@ -4,7 +4,7 @@ import { getRollup } from "../api.js";
 import RangeBar from "./RangeBar.jsx";
 import PerfTable from "./PerfTable.jsx";
 import { VarianceBars } from "./Charts.jsx";
-import { PerformanceStrip, Crumbs, Loading, Stat } from "./Bits.jsx";
+import { PerformanceStrip, Crumbs, Loading, Stat, CoverageNote } from "./Bits.jsx";
 import { fmt$signed, fmtPct } from "../format.js";
 
 const CHILD = {
@@ -53,6 +53,7 @@ export default function RollupPage({ level, regionId = null, areaId = null }) {
           {level === "store" && parent?.area_manager && <span className="muted">Area manager: {parent.area_manager}</span>}
         </div>
         <PerformanceStrip t={data.totals} extra={<Stat label="Hotspots" value={hotspotTotal} lines={[<span key="n" className="neutral">of {data.totals?.restaurants ?? 0} restaurants</span>]} />} />
+        <CoverageNote cov={data.forecastCoverage} />
       </div>
 
       <div className="grid">
@@ -73,6 +74,7 @@ export default function RollupPage({ level, regionId = null, areaId = null }) {
         <p className="muted card-sub">Select a column heading to rank by it.</p>
         <PerfTable rows={data.rows} linkFor={child.path} nameLabel={child.label} showSeverity={level === "store"}
           subtitleFor={level === "area" ? (r) => r.area_manager : level === "store" ? (r) => (r.flags?.length ? r.flags.join(" · ") : null) : null} />
+        <CoverageNote cov={data.forecastCoverage} />
       </div>
     </div>
   );
