@@ -6,6 +6,7 @@
 import db, { getSetting, audit } from "./db.js";
 import { addDays, isoDate, today, yesterday } from "./dates.js";
 import { refreshWeather } from "./weather.js";
+import { inUSBox, nameMatches } from "./geo.js";
 import { importDropFolder, ingestLog, importFolder, listPending } from "./imports.js";
 import { importMailbox, mailboxConfig } from "./mailbox.js";
 import { catchUp, generateLive } from "./sources/demo.js";
@@ -16,18 +17,6 @@ import { storeDailySummary, storedDailySummary } from "./summary.js";
 let running = null;
 let lastWeatherAt = 0;
 
-// A geocoded point must land inside the continental US, Alaska or Hawaii. A plain lat/lon
-// box that stretched to the borders let a few wrong matches through — "Decker Lake" to British
-// Columbia, "Market Place" to the US Virgin Islands — so the box is now three tight regions
-// that exclude Canada, Mexico and the Caribbean territories. Weather from the wrong place is
-// worse than no weather, which is only ever shown as context.
-export function inUSBox(lat, lon) {
-  if (lat === null || lat === undefined || lon === null || lon === undefined) return false;
-  const conus = lat >= 24.4 && lat <= 49.4 && lon >= -125.0 && lon <= -66.9;
-  const alaska = lat >= 51.2 && lat <= 71.6 && lon >= -172.5 && lon <= -129.9;
-  const hawaii = lat >= 18.9 && lat <= 22.3 && lon >= -160.3 && lon <= -154.8;
-  return conus || alaska || hawaii;
-}
 function inUnitedStates(hit) {
   if (hit.country_code && hit.country_code !== "US") return false;
   if (hit.country && !/united states/i.test(hit.country)) return false;
@@ -43,7 +32,7 @@ async function geocodeMissing() {
     // as well, and never save a point outside the US bounding box.
     const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(r.city)}&count=10&countryCode=US&language=en`, { signal: AbortSignal.timeout(15000) });
     if (!res.ok) continue;
-    const hits = ((await res.json()).results || []).filter(inUnitedStates);
+    const hits = ((await res.json()).results || []).filter(inUnitedStates).filter((h) => nameMatches(r.city, h.name));
     const hit = hits.find((h) => !r.state || [h.admin1, h.admin1_code].some((a) => a && (a.toLowerCase() === String(r.state).toLowerCase() || STATE_NAMES[String(r.state).toUpperCase()] === a))) || (r.state ? null : hits[0]);
     if (hit) {
       db.prepare("UPDATE restaurant SET latitude = ?, longitude = ?, timezone = COALESCE(?, timezone) WHERE restaurant_id = ?").run(hit.latitude, hit.longitude, hit.timezone || null, r.restaurant_id);

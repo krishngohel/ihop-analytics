@@ -3,6 +3,7 @@
 import { DatabaseSync } from "node:sqlite";
 import path from "path";
 import { fileURLToPath } from "url";
+import { distinctiveCity } from "./geo.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dbPath = process.env.OPS_DB_PATH || path.join(__dirname, "..", "ops.db");
@@ -224,14 +225,20 @@ for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) insertSetting.run(k, v);
 // Columbia, Market Place -> US Virgin Islands). Clear any point outside the continental US /
 // Alaska / Hawaii boxes and drop its weather, so the next refresh re-geocodes it correctly
 // (with the fixed US-only search) or leaves it without weather, which is only ever context.
+const clearGeocode = db.prepare("UPDATE restaurant SET latitude = NULL, longitude = NULL, timezone = 'America/Chicago' WHERE restaurant_id = ?");
+const clearWeather = db.prepare("DELETE FROM weather WHERE restaurant_id = ?");
 const outOfUS = db.prepare(`SELECT restaurant_id FROM restaurant WHERE latitude IS NOT NULL AND NOT (
     (latitude BETWEEN 24.4 AND 49.4 AND longitude BETWEEN -125.0 AND -66.9)
     OR (latitude BETWEEN 51.2 AND 71.6 AND longitude BETWEEN -172.5 AND -129.9)
     OR (latitude BETWEEN 18.9 AND 22.3 AND longitude BETWEEN -160.3 AND -154.8)
   )`).all();
-for (const r of outOfUS) {
-  db.prepare("DELETE FROM weather WHERE restaurant_id = ?").run(r.restaurant_id);
-  db.prepare("UPDATE restaurant SET latitude = NULL, longitude = NULL, timezone = 'America/Chicago' WHERE restaurant_id = ?").run(r.restaurant_id);
+for (const r of outOfUS) { clearWeather.run(r.restaurant_id); clearGeocode.run(r.restaurant_id); }
+// Also clear stores whose name is only generic place words (e.g. "Market Place"): the old
+// search resolved those to an unrelated US city (New Haven, CT) that sits inside the US box.
+// They re-geocode with the name-match guard on the next refresh and get no weather if nothing
+// genuinely matches — better than weather from the wrong state.
+for (const r of db.prepare("SELECT restaurant_id, city FROM restaurant WHERE latitude IS NOT NULL AND city IS NOT NULL").all()) {
+  if (!distinctiveCity(r.city)) { clearWeather.run(r.restaurant_id); clearGeocode.run(r.restaurant_id); }
 }
 
 export function getSetting(key) {
