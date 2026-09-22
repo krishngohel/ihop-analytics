@@ -156,13 +156,19 @@ export function PerformanceStrip({ t, live = false, extra = null }) {
         <span key="p"><Delta value={t.sales_variance_pct} /> <span className="neutral">vs. forecast{partial ? " (recent days)" : ""}</span></span>,
         !live && <span key="ly"><Delta value={t.prior_year_variance_pct} /> <span className="neutral">vs. last year ({fmt$(t.prior_year_sales)})</span></span>,
       ]} />
-      <Stat label="Actual labor" value={fmtHours(t.actual_labor_hours)} lines={[
-        <span key="a" className="neutral">Allowable {fmtHours(t.allowable_labor_hours)} · scheduled {fmtHours(t.scheduled_labor_hours)}</span>,
-        <span key="c" className="neutral">Labor cost {fmt$(t.actual_labor_cost)}{t.labor_cost_pct !== null && t.labor_cost_pct !== undefined ? ` (${t.labor_cost_pct}% of sales)` : ""}</span>,
+      <Stat label={live ? "Labor so far" : "Actual labor"} value={fmtHours(t.actual_labor_hours)} lines={[
+        <span key="a" className="neutral">{live ? "Full-day allowable" : "Allowable"} {fmtHours(t.allowable_labor_hours)}{live ? "" : ` · scheduled ${fmtHours(t.scheduled_labor_hours)}`}</span>,
+        <span key="c" className="neutral">Labor cost {fmt$(t.actual_labor_cost)}{!live && t.labor_cost_pct !== null && t.labor_cost_pct !== undefined ? ` (${t.labor_cost_pct}% of sales)` : live ? " so far" : ""}</span>,
       ]} />
-      <Stat label="Labor variance" value={<span className={laborTone(t.labor_variance)}>{fmtHoursSigned(t.labor_variance)}</span>} lines={[
-        <span key="p"><Delta value={t.labor_variance_pct} kind="labor" /> <span className="neutral">vs. allowable</span></span>,
-      ]} />
+      {/* Live labor can't be compared to the full-day allowable — hours accrue before the sales
+          they cover — so the variance only appears once the day is final. */}
+      {live ? (
+        <Stat label="Labor variance" value={<span className="neutral">—</span>} lines={[<span key="p" className="neutral">Compares once the day closes</span>]} />
+      ) : (
+        <Stat label="Labor variance" value={<span className={laborTone(t.labor_variance)}>{fmtHoursSigned(t.labor_variance)}</span>} lines={[
+          <span key="p"><Delta value={t.labor_variance_pct} kind="labor" /> <span className="neutral">vs. allowable</span></span>,
+        ]} />
+      )}
       {!live && (
         <Stat label="Guest rating" value={fmtRating(t.average_rating)} lines={[
           <span key="s" className="neutral">{fmtNum(t.survey_count)} surveys</span>,
@@ -203,7 +209,9 @@ export function Snapshot({ title, caption, t, live = false, detailed = false, to
       <dl>
         <div><dt>{live ? "vs. forecast so far" : partialForecast(t) ? "vs. forecast (recent days)" : "vs. forecast"}</dt><dd><Delta value={t.sales_variance_pct} />{detailed && t.forecast_basis !== null && t.forecast_basis !== undefined && <> <span className="neutral money">({fmt$(partialForecast(t) ? t.forecast_covered_sales : t.actual_sales)} vs {fmt$(t.forecast_basis)})</span></>}</dd></div>
         {!live && <div><dt>vs. last year</dt><dd><Delta value={t.prior_year_variance_pct} /></dd></div>}
-        <div><dt>Labor vs. allowable</dt><dd><Delta value={t.labor_variance_pct} kind="labor" />{detailed && t.labor_variance !== null && t.labor_variance !== undefined && <> <span className={`money ${laborTone(t.labor_variance)}`}>({fmtHoursSigned(t.labor_variance)})</span></>}</dd></div>
+        {live
+          ? <div><dt>Labor so far</dt><dd className="money">{fmtHours(t.actual_labor_hours)}</dd></div>
+          : <div><dt>Labor vs. allowable</dt><dd><Delta value={t.labor_variance_pct} kind="labor" />{detailed && t.labor_variance !== null && t.labor_variance !== undefined && <> <span className={`money ${laborTone(t.labor_variance)}`}>({fmtHoursSigned(t.labor_variance)})</span></>}</dd></div>}
         {detailed && !live && <div><dt>Guest rating</dt><dd className="money">{fmtRating(t.average_rating)} <span className="neutral">({fmtNum(t.survey_count)} surveys)</span></dd></div>}
       </dl>
     </Wrap>

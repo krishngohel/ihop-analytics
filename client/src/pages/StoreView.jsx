@@ -99,7 +99,7 @@ export default function StoreView() {
                     <td className="num money">{fmt$(d.actual_sales)}</td><td className="num money">{fmt$(d.forecast_basis)}</td><td className="num money">{fmt$(d.prior_year_sales)}</td>
                     <td className="num"><Delta value={d.sales_variance_pct} /></td><td className="num"><Delta value={d.prior_year_variance_pct} /></td>
                     <td className="num money">{fmtNum(d.actual_labor_hours)}</td><td className="num money">{fmtNum(d.allowable_labor_hours)}</td>
-                    <td className="num"><Delta value={d.labor_variance_pct} kind="labor" /></td>
+                    <td className="num">{d.is_final === 0 ? <span className="neutral" title="Hours worked so far can't be compared to the full-day allowable until the day closes">so far</span> : <Delta value={d.labor_variance_pct} kind="labor" />}</td>
                     <td className="num money">{fmtRating(d.average_rating)}</td>
                     <td className={d.weather?.rain_flag ? "wx-wet" : ""}>{wx(d.weather)}</td><td className={d.weatherLastYear?.rain_flag ? "wx-wet" : ""}>{wx(d.weatherLastYear)}</td>
                   </tr>

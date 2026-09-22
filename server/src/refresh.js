@@ -16,14 +16,22 @@ import { storeDailySummary, storedDailySummary } from "./summary.js";
 let running = null;
 let lastWeatherAt = 0;
 
-// A geocoded point must land inside the United States (including Alaska, Hawaii and the
-// territories). Anything outside is a wrong-country match and is rejected — weather from the
-// wrong place is worse than no weather, which is only ever shown as context.
+// A geocoded point must land inside the continental US, Alaska or Hawaii. A plain lat/lon
+// box that stretched to the borders let a few wrong matches through — "Decker Lake" to British
+// Columbia, "Market Place" to the US Virgin Islands — so the box is now three tight regions
+// that exclude Canada, Mexico and the Caribbean territories. Weather from the wrong place is
+// worse than no weather, which is only ever shown as context.
+export function inUSBox(lat, lon) {
+  if (lat === null || lat === undefined || lon === null || lon === undefined) return false;
+  const conus = lat >= 24.4 && lat <= 49.4 && lon >= -125.0 && lon <= -66.9;
+  const alaska = lat >= 51.2 && lat <= 71.6 && lon >= -172.5 && lon <= -129.9;
+  const hawaii = lat >= 18.9 && lat <= 22.3 && lon >= -160.3 && lon <= -154.8;
+  return conus || alaska || hawaii;
+}
 function inUnitedStates(hit) {
   if (hit.country_code && hit.country_code !== "US") return false;
   if (hit.country && !/united states/i.test(hit.country)) return false;
-  const { latitude: lat, longitude: lon } = hit;
-  return lat >= 17.5 && lat <= 71.6 && lon >= -179.5 && lon <= -64.5;
+  return inUSBox(hit.latitude, hit.longitude);
 }
 
 async function geocodeMissing() {

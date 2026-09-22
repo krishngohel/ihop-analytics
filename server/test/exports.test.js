@@ -81,6 +81,27 @@ test("weekly and weekday rollups follow the same rule", async () => {
   assert.equal(t.daypartByDay[0].breakfast, 525);
 });
 
+test("a store with a broken too-low forecast is kept in the tables but never highlighted as an outperformer", async () => {
+  const { db, days } = await seed();
+  const { savePerformance } = await import("../src/performance.js");
+  const { evaluateHotspots } = await import("../src/hotspots.js");
+  // A third store whose Rosnet forecast is absurdly low ($50 against $3,000 in sales) on the
+  // forecasted days — the shape of a broken forecast, which reads as +5,900%.
+  db.prepare("INSERT INTO region (region_name) VALUES ('West')").run();
+  const rid3 = db.prepare("SELECT region_id FROM region WHERE region_name='West'").get().region_id;
+  db.prepare("INSERT INTO area (area_name, region_id) VALUES ('Area W1', ?)").run(rid3);
+  const aid3 = db.prepare("SELECT area_id FROM area WHERE area_name='Area W1'").get().area_id;
+  db.prepare("INSERT INTO restaurant (restaurant_name, store_number, region_id, area_id) VALUES ('IHOP #9 Broken Forecast', '9', ?, ?)").run(rid3, aid3);
+  const brokenId = db.prepare("SELECT restaurant_id FROM restaurant WHERE store_number='9'").get().restaurant_id;
+  for (const date of days.slice(6)) savePerformance({ date, restaurant_id: brokenId, daypart: "all", actual_sales: 3000, forecast_sales: 50, prior_year_sales: 2900, is_final: 1 }, "test");
+
+  const hs = evaluateHotspots(user, { from: days[6], to: days[9] });
+  const broken = hs.evaluated.find((s) => s.id === brokenId);
+  assert.ok(broken.sales_variance_pct > 1000, "the real (broken) variance is still computed and kept in the ranked data");
+  assert.equal(hs.positives.some((p) => p.id === brokenId), false, "it is not highlighted as an outperformer");
+  assert.notEqual(broken.severity, "positive_outlier", "it does not get the positive-outlier badge");
+});
+
 test("the Excel workbook is a valid package with charts that point at its cells", async () => {
   const { days } = await seed();
   const { buildWorkbook } = await import("../src/export.js");

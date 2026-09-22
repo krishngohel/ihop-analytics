@@ -15,6 +15,10 @@ const FLAG_SALES_PCT = -5;
 const FLAG_LABOR_PCT = 5;
 const WEAK_GUEST_RATING = 4.0;
 const MIN_SURVEYS = 5;
+// A store beating forecast by more than this has a broken (too-low) forecast in Rosnet, not a
+// real result — a $50 forecast against $3,500 in sales reads as +7,000%. Such stores are kept
+// in the ranked tables with their real numbers, but never highlighted as "outperformers".
+const IMPLAUSIBLE_GAIN_PCT = 150;
 
 export const CATEGORIES = {
   overall: "All hotspots",
@@ -157,7 +161,7 @@ function evaluateHotspotsFor(user, { from, to, daypart = "all", filters = {} }) 
   const byRankSum = evaluated.filter((s) => !forcedIds.has(s.id) && hasMiss(s)).sort((a, b) => a.rankSum - b.rankSum);
   const overallIds = new Set([...forcedIds, ...byRankSum.slice(0, Math.max(0, k - forced.length)).map((s) => s.id)]);
 
-  const positive = worst(stores, (s) => s.sales_variance_pct, k, { descending: true, qualifies: (s) => s.sales_variance_pct > 0 });
+  const positive = worst(stores, (s) => s.sales_variance_pct, k, { descending: true, qualifies: (s) => s.sales_variance_pct > 0 && s.sales_variance_pct <= IMPLAUSIBLE_GAIN_PCT });
 
   for (const s of evaluated) {
     s.is_hotspot = overallIds.has(s.id);

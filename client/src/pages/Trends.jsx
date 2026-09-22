@@ -6,7 +6,7 @@ import RangeBar from "../components/RangeBar.jsx";
 import { ScoreTile, SalesTile, CoverageNote, Delta, Loading, DaypartNote } from "../components/Bits.jsx";
 import { SalesTrend, LaborTrend, WeeklyBars, VarianceTrend, WeekdayBars, DaypartStack, GroupLines, MetricTrend, SERIES } from "../components/Charts.jsx";
 import { DownloadIcon, ReportIcon } from "../components/Icons.jsx";
-import { fmt$, fmtNum, fmtHours, fmtRating, prettyDay } from "../format.js";
+import { fmt$, fmtNum, fmtHours, fmtRating, prettyDay, partialForecast } from "../format.js";
 
 const has = (v) => v !== null && v !== undefined;
 const anyValue = (rows, key) => rows.some((r) => has(r[key]));
@@ -63,7 +63,7 @@ export default function Trends() {
         </div>
         <div className="scorecard">
           <SalesTile t={tot} label="Sales in range" />
-          <ScoreTile label="vs. last year" value={<Delta value={tot.prior_year_variance_pct} />} sub={tot.prior_year_sales ? `Last year ${fmt$(tot.prior_year_sales)}` : "No prior year on file"} />
+          <ScoreTile label="vs. last year" value={<Delta value={tot.prior_year_variance_pct} />} sub={tot.prior_year_sales ? `Last year ${fmt$(tot.prior_year_sales)}${partialForecast(tot) ? " · recent days" : ""}` : "No prior year on file"} />
           <ScoreTile label="Labor vs. allowable" value={fmtHours(tot.actual_labor_hours)} delta={tot.labor_variance_pct} deltaKind="labor" deltaLabel={tot.labor_variance_pct > 0 ? "over" : "under"} sub={has(tot.labor_cost_pct) ? `${tot.labor_cost_pct}% of sales` : "No labor cost on file"} />
           <ScoreTile label="Last full week" value={lastFull ? fmt$(lastFull.actual_sales) : "–"} delta={lastFull?.week_over_week_pct} deltaLabel="week over week" sub={lastFull ? `Week of ${prettyDay(lastFull.week_start)}` : "No full week in range yet"} />
         </div>

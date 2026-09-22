@@ -6,7 +6,7 @@ import PerfTable from "../components/PerfTable.jsx";
 import HotspotCard from "../components/HotspotCard.jsx";
 import { SalesTrend, VarianceBars } from "../components/Charts.jsx";
 import { Snapshot, StatusPill, ScoreTile, SalesTile, CoverageNote, Delta, Loading, DaypartNote } from "../components/Bits.jsx";
-import { fmt$, fmtPct, fmtNum, fmtRating, fmtHoursSigned, fmtTemp, fmtHours, prettyDay } from "../format.js";
+import { fmt$, fmtPct, fmtNum, fmtRating, fmtHoursSigned, fmtTemp, fmtHours, prettyDay, partialForecast } from "../format.js";
 
 // One glance: is the company fine, worth watching, or on fire? Criticals or a real miss
 // escalate; a small wobble is a watch; otherwise on track.
@@ -34,17 +34,18 @@ function WeatherSummary({ w }) {
   const line = (label, s) => (
     <div className="wx-summary-line">
       <strong>{label}</strong>
-      <span>{s.restaurants ? `${fmtNum(s.rain)} of ${fmtNum(s.restaurants)} restaurants had rain${s.thunderstorms ? `, ${fmtNum(s.thunderstorms)} with thunderstorms` : ""} · average high ${fmtTemp(s.avg_high)}` : "No weather on file"}</span>
+      <span>{s.restaurants ? `${fmtNum(s.rain)} of ${fmtNum(s.restaurants)} with rain${s.thunderstorms ? `, ${fmtNum(s.thunderstorms)} with thunderstorms` : ""} · average high ${fmtTemp(s.avg_high)}` : "No weather on file"}</span>
     </div>
   );
   const wetAreas = (w.current.byArea || []).filter((a) => a.rain > 0);
+  const located = w.current.restaurants || 0;
   return (
     <div className="card">
       <h3>Weather across markets</h3>
       {line(prettyDay(w.current.date), w.current)}
       {line(`${prettyDay(w.lastYear.date, { weekday: "short", month: "short", day: "numeric", year: "numeric" })}, last year`, w.lastYear)}
       <p className="muted" style={{ marginTop: 10 }}>
-        {wetAreas.length ? `Rain in ${wetAreas.map((a) => a.area_name).join(", ")}.` : "No markets reported rain."} Shown as context, not an explanation.
+        {wetAreas.length ? `Rain in ${wetAreas.map((a) => a.area_name).join(", ")}.` : "No markets reported rain."} Counts cover the {located} restaurant{located === 1 ? "" : "s"} located for weather. Shown as context, not an explanation.
       </p>
     </div>
   );
@@ -75,11 +76,16 @@ export default function Overview() {
           <SalesTile t={t} live={live} to="/regions" />
           {!live && (
             <ScoreTile to="/regions" label="vs. last year" value={<Delta value={t.prior_year_variance_pct} />}
-              sub={t.prior_year_sales ? `Last year ${fmt$(t.prior_year_sales)}` : "No prior year on file"} />
+              sub={t.prior_year_sales ? `Last year ${fmt$(t.prior_year_sales)}${partialForecast(t) ? " · recent days" : ""}` : "No prior year on file"} />
           )}
-          <ScoreTile to="/regions" label="Labor vs. allowable" value={fmtHours(t.actual_labor_hours)}
-            delta={t.labor_variance_pct} deltaKind="labor" deltaLabel={t.labor_variance_pct > 0 ? "over" : "under"}
-            sub={`Allowable ${fmtHours(t.allowable_labor_hours)}${t.labor_cost_pct ? ` · ${t.labor_cost_pct}% of sales` : ""}`} />
+          {live ? (
+            <ScoreTile to="/regions" label="Labor so far" value={fmtHours(t.actual_labor_hours)}
+              sub={`Full-day allowable ${fmtHours(t.allowable_labor_hours)} · settles tonight`} />
+          ) : (
+            <ScoreTile to="/regions" label="Labor vs. allowable" value={fmtHours(t.actual_labor_hours)}
+              delta={t.labor_variance_pct} deltaKind="labor" deltaLabel={t.labor_variance_pct > 0 ? "over" : "under"}
+              sub={`Allowable ${fmtHours(t.allowable_labor_hours)}${t.labor_cost_pct ? ` · ${t.labor_cost_pct}% of sales` : ""}`} />
+          )}
           <ScoreTile to="/hotspots" label="Guest rating" value={fmtRating(t.average_rating)} sub={`${fmtNum(t.survey_count)} surveys`} />
           <ScoreTile accent to="/hotspots" label="Need attention" value={o.hotspots.count}
             sub={o.hotspots.critical ? `${o.hotspots.critical} critical · of ${o.hotspots.restaurants}` : `of ${o.hotspots.restaurants} restaurants`} />
